@@ -12,12 +12,9 @@ import { formatDateLabel } from '@/lib/format';
 import { fetchAnnouncements } from '@/lib/student-api';
 import type { Announcement } from '@/types/supabase';
 
-type ViewState = 'auto' | 'loading' | 'empty' | 'error';
-
 export default function AnnouncementsScreen() {
   const { colors, cardShadow } = useAppTheme();
   const { t, locale } = useI18n();
-  const [stateOverride, setStateOverride] = useState<ViewState>('auto');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [announcements, setAnnouncements] = useState<Announcement[]>([]);
@@ -44,13 +41,7 @@ export default function AnnouncementsScreen() {
     }, [loadAnnouncements])
   );
 
-  const effectiveState = (() => {
-    if (stateOverride !== 'auto') return stateOverride;
-    if (loading) return 'loading';
-    if (error) return 'error';
-    if (!announcements.length) return 'empty';
-    return 'auto';
-  })();
+  const effectiveState = loading ? 'loading' : error ? 'error' : announcements.length === 0 ? 'empty' : 'auto';
 
   return (
     <View style={styles.page}>
@@ -58,17 +49,6 @@ export default function AnnouncementsScreen() {
         <View style={styles.header}>
           <Text style={styles.title}>{t('announcements.title')}</Text>
           <Ionicons name="notifications-outline" size={22} color={colors.text} />
-        </View>
-
-        <View style={styles.stateRow}>
-          {(['auto', 'loading', 'empty', 'error'] as ViewState[]).map((state) => (
-            <TouchableOpacity
-              key={state}
-              style={[styles.stateChip, stateOverride === state && styles.stateChipActive]}
-              onPress={() => setStateOverride(state)}>
-              <Text style={[styles.stateChipText, stateOverride === state && styles.stateChipTextActive]}>{t(`states.${state}`)}</Text>
-            </TouchableOpacity>
-          ))}
         </View>
 
         {effectiveState === 'loading' ? (
@@ -93,10 +73,7 @@ export default function AnnouncementsScreen() {
             title={t('common.networkErrorTitle')}
             description={error || t('announcements.loadError')}
             actionLabel={t('common.retry')}
-            onActionPress={() => {
-              setStateOverride('auto');
-              void loadAnnouncements();
-            }}
+            onActionPress={() => void loadAnnouncements()}
           />
         ) : null}
 
@@ -155,33 +132,6 @@ const createStyles = (
       fontSize: 28,
       fontWeight: '800',
       color: colors.text,
-    },
-    stateRow: {
-      flexDirection: 'row',
-      flexWrap: 'wrap',
-      gap: 8,
-      marginBottom: 14,
-    },
-    stateChip: {
-      borderWidth: 1,
-      borderColor: colors.border,
-      borderRadius: 999,
-      paddingHorizontal: 10,
-      paddingVertical: 5,
-      backgroundColor: colors.surface,
-    },
-    stateChipActive: {
-      backgroundColor: colors.primarySoft,
-      borderColor: colors.primary,
-    },
-    stateChipText: {
-      color: colors.textMuted,
-      fontSize: 12,
-      textTransform: 'capitalize',
-    },
-    stateChipTextActive: {
-      color: colors.primary,
-      fontWeight: '700',
     },
     stackGap: {
       gap: 10,

@@ -7,9 +7,10 @@ import { ActivityIndicator, StyleSheet, Text, TouchableOpacity, View } from 'rea
 
 import { useAppTheme } from '@/hooks/use-app-theme';
 import { useI18n } from '@/hooks/use-i18n';
+import { getErrorMessage } from '@/lib/errors';
 import { formatDateLabel } from '@/lib/format';
 import type { ThemeMode } from '@/lib/settings-storage';
-import { fetchTaskStats } from '@/lib/student-api';
+import { fetchTaskStats, getCachedTaskStats } from '@/lib/student-api';
 import { useAuth } from '@/providers/auth-provider';
 import { useSettings } from '@/providers/settings-provider';
 
@@ -47,6 +48,7 @@ export default function ProfileScreen() {
   const [loading, setLoading] = useState(true);
   const [totalTasks, setTotalTasks] = useState(0);
   const [doneTasks, setDoneTasks] = useState(0);
+  const [statsError, setStatsError] = useState('');
   const registrationDate = profile?.created_at ?? user?.created_at ?? null;
   const avatarUrl = profile?.avatar_url?.trim()
     || (typeof user?.user_metadata?.avatar_url === 'string' ? user.user_metadata.avatar_url.trim() : '');
@@ -58,13 +60,22 @@ export default function ProfileScreen() {
 
     try {
       setLoading(true);
+      setStatsError('');
+
+      const cached = await getCachedTaskStats(user.id);
+      setTotalTasks(cached.total);
+      setDoneTasks(cached.done);
+      setLoading(false);
+
       const stats = await fetchTaskStats(user.id);
       setTotalTasks(stats.total);
       setDoneTasks(stats.done);
+    } catch (error) {
+      setStatsError(getErrorMessage(error, t('profile.statsError')));
     } finally {
       setLoading(false);
     }
-  }, [user?.id]);
+  }, [t, user?.id]);
 
   useFocusEffect(
     useCallback(() => {
@@ -116,6 +127,7 @@ export default function ProfileScreen() {
               <Text style={themedStyles.metaTitle}>{t('profile.registrationDate')}</Text>
               <Text style={themedStyles.metaValue}>{formatDateLabel(registrationDate, locale, t('common.noDate'))}</Text>
             </View>
+            {statsError ? <Text style={themedStyles.statsError}>{statsError}</Text> : null}
           </>
         )}
 
@@ -271,6 +283,12 @@ const createStyles = (
     metaValue: {
       color: colors.text,
       fontWeight: '700',
+    },
+    statsError: {
+      marginBottom: 10,
+      color: colors.danger,
+      fontSize: 12,
+      fontWeight: '600',
     },
     settingsCard: {
       backgroundColor: colors.surface,

@@ -13,7 +13,6 @@ import { deleteResource, fetchResources } from '@/lib/student-api';
 import { useAuth } from '@/providers/auth-provider';
 import type { Resource } from '@/types/supabase';
 
-type ViewState = 'auto' | 'loading' | 'empty' | 'error';
 type ResourceFilter = 'tout' | 'note' | 'link' | 'file';
 
 const typeMeta = {
@@ -26,7 +25,6 @@ export default function ResourcesScreen() {
   const { user } = useAuth();
   const { colors, cardShadow } = useAppTheme();
   const { t, locale } = useI18n();
-  const [stateOverride, setStateOverride] = useState<ViewState>('auto');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [filter, setFilter] = useState<ResourceFilter>('tout');
@@ -72,13 +70,7 @@ export default function ResourcesScreen() {
     return data;
   }, [filter, query, resources]);
 
-  const effectiveState = (() => {
-    if (stateOverride !== 'auto') return stateOverride;
-    if (loading) return 'loading';
-    if (error) return 'error';
-    if (!resources.length) return 'empty';
-    return 'auto';
-  })();
+  const effectiveState = loading ? 'loading' : error ? 'error' : resources.length === 0 ? 'empty' : 'auto';
 
   const removeResource = async (resourceId: string) => {
     if (!user?.id) return;
@@ -140,17 +132,6 @@ export default function ResourcesScreen() {
           />
         </View>
 
-        <View style={styles.stateRow}>
-          {(['auto', 'loading', 'empty', 'error'] as ViewState[]).map((state) => (
-            <TouchableOpacity
-              key={state}
-              style={[styles.stateChip, stateOverride === state && styles.stateChipActive]}
-              onPress={() => setStateOverride(state)}>
-              <Text style={[styles.stateChipText, stateOverride === state && styles.stateChipTextActive]}>{t(`states.${state}`)}</Text>
-            </TouchableOpacity>
-          ))}
-        </View>
-
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filtersRow}>
           {filterLabels.map((item) => (
             <TouchableOpacity
@@ -186,10 +167,7 @@ export default function ResourcesScreen() {
             title={t('common.networkErrorTitle')}
             description={error || t('resources.loadError')}
             actionLabel={t('common.retry')}
-            onActionPress={() => {
-              setStateOverride('auto');
-              void loadResources();
-            }}
+            onActionPress={() => void loadResources()}
           />
         ) : null}
 
@@ -294,33 +272,6 @@ const createStyles = (
     searchInput: {
       flex: 1,
       color: colors.text,
-    },
-    stateRow: {
-      flexDirection: 'row',
-      flexWrap: 'wrap',
-      gap: 8,
-      marginBottom: 10,
-    },
-    stateChip: {
-      borderWidth: 1,
-      borderColor: colors.border,
-      borderRadius: 999,
-      paddingHorizontal: 10,
-      paddingVertical: 5,
-      backgroundColor: colors.surface,
-    },
-    stateChipActive: {
-      backgroundColor: colors.primarySoft,
-      borderColor: colors.primary,
-    },
-    stateChipText: {
-      color: colors.textMuted,
-      fontSize: 12,
-      textTransform: 'capitalize',
-    },
-    stateChipTextActive: {
-      color: colors.primary,
-      fontWeight: '700',
     },
     filtersRow: {
       gap: 8,

@@ -21,6 +21,21 @@ export function isLikelyNetworkError(error: unknown): boolean {
   return networkErrorHints.some((hint) => message.includes(hint));
 }
 
+function isMissingTaskArchiveColumnError(error: unknown): boolean {
+  if (!error || typeof error !== 'object') return false;
+  const typed = error as { code?: unknown; message?: unknown };
+  if (typed.code !== '42703') return false;
+  const message = typeof typed.message === 'string' ? typed.message.toLowerCase() : '';
+  return (
+    message.includes('tasks.is_persistent')
+    || message.includes('tasks.completed_at')
+    || message.includes('column is_persistent')
+    || message.includes('column completed_at')
+    || message.includes('is_persistent does not exist')
+    || message.includes('completed_at does not exist')
+  );
+}
+
 async function syncOperation(operation: OutboxOperation): Promise<void> {
   if (operation.entity === 'task' || operation.entity === 'resource') {
     const { error: profileError } = await supabase
@@ -32,7 +47,24 @@ async function syncOperation(operation: OutboxOperation): Promise<void> {
   if (operation.entity === 'task') {
     if (operation.action === 'upsert') {
       const { error } = await supabase.from('tasks').upsert(operation.record, { onConflict: 'id' });
-      if (error) throw error;
+      if (error) {
+        if (!isMissingTaskArchiveColumnError(error)) {
+          throw error;
+        }
+
+        const legacyRecord = {
+          id: operation.record.id,
+          user_id: operation.record.user_id,
+          title: operation.record.title,
+          description: operation.record.description,
+          status: operation.record.status,
+          priority: operation.record.priority,
+          due_date: operation.record.due_date,
+          created_at: operation.record.created_at,
+        };
+        const legacyUpsert = await supabase.from('tasks').upsert(legacyRecord, { onConflict: 'id' });
+        if (legacyUpsert.error) throw legacyUpsert.error;
+      }
       return;
     }
 

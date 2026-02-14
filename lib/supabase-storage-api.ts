@@ -7,6 +7,15 @@ type UploadParams = {
   folder: string;
 };
 
+type UploadLocalParams = {
+  bucket: 'images' | 'files';
+  fileUri: string;
+  userId: string;
+  folder: string;
+  fileName?: string;
+  contentType?: string | null;
+};
+
 function createUuid(): string {
   if (typeof globalThis.crypto?.randomUUID === 'function') {
     return globalThis.crypto.randomUUID();
@@ -28,6 +37,13 @@ function extensionFromUrl(url: string): string | null {
   } catch {
     return null;
   }
+}
+
+function extensionFromName(name: string | null | undefined): string | null {
+  if (!name) return null;
+  const normalized = name.toLowerCase();
+  const match = normalized.match(/\.([a-z0-9]{2,8})$/);
+  return match?.[1] ?? null;
 }
 
 function extensionFromContentType(contentType: string | null): string {
@@ -75,6 +91,48 @@ export async function uploadRemoteAssetToBucket({
   const { error: uploadError } = await supabase.storage.from(bucket).upload(objectPath, blob, {
     upsert: false,
     contentType,
+  });
+  if (uploadError) {
+    throw uploadError;
+  }
+
+  const { data } = supabase.storage.from(bucket).getPublicUrl(objectPath);
+  if (!data?.publicUrl) {
+    throw new Error("Impossible d'obtenir l'URL publique du fichier.");
+  }
+
+  return data.publicUrl;
+}
+
+export async function uploadLocalAssetToBucket({
+  bucket,
+  fileUri,
+  userId,
+  folder,
+  fileName,
+  contentType,
+}: UploadLocalParams): Promise<string> {
+  const uri = fileUri.trim();
+  if (!uri) {
+    throw new Error('Fichier local introuvable.');
+  }
+
+  const response = await fetch(uri);
+  if (!response.ok) {
+    throw new Error(`Impossible de lire le fichier local (${response.status}).`);
+  }
+
+  const blob = await response.blob();
+  const resolvedContentType = contentType || blob.type || 'application/octet-stream';
+  const extension =
+    extensionFromName(fileName)
+    ?? extensionFromName(uri)
+    ?? extensionFromContentType(resolvedContentType);
+  const objectPath = `${folder}/${userId}/${Date.now()}-${createUuid()}.${extension}`;
+
+  const { error: uploadError } = await supabase.storage.from(bucket).upload(objectPath, blob, {
+    upsert: false,
+    contentType: resolvedContentType,
   });
   if (uploadError) {
     throw uploadError;

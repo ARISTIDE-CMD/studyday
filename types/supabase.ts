@@ -14,6 +14,8 @@ export type Task = {
   status: 'todo' | 'in_progress' | 'done';
   priority: 'low' | 'medium' | 'high';
   due_date: string | null;
+  completed_at: string | null;
+  is_persistent: boolean;
   created_at: string | null;
 };
 

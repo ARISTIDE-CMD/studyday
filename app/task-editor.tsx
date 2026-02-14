@@ -7,6 +7,7 @@ import {
   Platform,
   ScrollView,
   StyleSheet,
+  Switch,
   Text,
   TextInput,
   TouchableOpacity,
@@ -17,7 +18,7 @@ import { Toast } from '@/components/ui/toast';
 import { useAppTheme } from '@/hooks/use-app-theme';
 import { useI18n } from '@/hooks/use-i18n';
 import { getErrorMessage } from '@/lib/errors';
-import { createTask, fetchTaskById, updateTask } from '@/lib/student-api';
+import { createTask, fetchTaskById, getCachedTaskById, updateTask } from '@/lib/student-api';
 import { toIsoDate } from '@/lib/format';
 import { useAuth } from '@/providers/auth-provider';
 
@@ -34,6 +35,7 @@ export default function TaskEditorScreen() {
   const [description, setDescription] = useState('');
   const [dueDate, setDueDate] = useState(toIsoDate());
   const [priority, setPriority] = useState<Priority>('medium');
+  const [isPersistent, setIsPersistent] = useState(false);
   const [loading, setLoading] = useState(false);
   const [screenLoading, setScreenLoading] = useState(false);
   const [error, setError] = useState('');
@@ -44,15 +46,32 @@ export default function TaskEditorScreen() {
     const run = async () => {
       if (!taskId || !user?.id) return;
 
-      try {
-        setScreenLoading(true);
-        const data = await fetchTaskById(user.id, taskId);
-        if (!data) return;
-
+      const applyTask = (data: {
+        title: string;
+        description: string | null;
+        due_date: string | null;
+        priority: Priority;
+        is_persistent: boolean;
+      }) => {
         setTitle(data.title);
         setDescription(data.description ?? '');
         setDueDate(data.due_date ?? toIsoDate());
         setPriority(data.priority);
+        setIsPersistent(Boolean(data.is_persistent));
+      };
+
+      try {
+        setScreenLoading(true);
+        const cached = await getCachedTaskById(user.id, taskId);
+        if (cached) {
+          applyTask(cached);
+          setScreenLoading(false);
+        }
+
+        const data = await fetchTaskById(user.id, taskId);
+        if (!data) return;
+
+        applyTask(data);
       } finally {
         setScreenLoading(false);
       }
@@ -83,6 +102,7 @@ export default function TaskEditorScreen() {
           description: description.trim() || null,
           due_date: dueDate || null,
           priority,
+          is_persistent: isPersistent,
         });
       } else {
         await createTask({
@@ -91,6 +111,7 @@ export default function TaskEditorScreen() {
           description,
           dueDate,
           priority,
+          isPersistent,
         });
       }
 
@@ -165,6 +186,19 @@ export default function TaskEditorScreen() {
                   </Text>
                 </TouchableOpacity>
               ))}
+            </View>
+
+            <View style={styles.persistentRow}>
+              <View style={styles.persistentTextWrap}>
+                <Text style={styles.persistentLabel}>{t('taskEditor.fieldPersistent')}</Text>
+                <Text style={styles.persistentHelp}>{t('taskEditor.persistentHelp')}</Text>
+              </View>
+              <Switch
+                value={isPersistent}
+                onValueChange={setIsPersistent}
+                trackColor={{ false: colors.border, true: colors.primarySoft }}
+                thumbColor={isPersistent ? colors.primary : '#FFFFFF'}
+              />
             </View>
 
             {error ? <Text style={styles.errorText}>{error}</Text> : null}
@@ -259,6 +293,27 @@ const createStyles = (colors: ReturnType<typeof useAppTheme>['colors']) =>
   },
   priorityTextActive: {
     color: colors.primary,
+  },
+  persistentRow: {
+    marginTop: 14,
+    paddingVertical: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+  },
+  persistentTextWrap: {
+    flex: 1,
+  },
+  persistentLabel: {
+    color: colors.text,
+    fontWeight: '700',
+    marginBottom: 2,
+  },
+  persistentHelp: {
+    color: colors.textMuted,
+    fontSize: 12,
+    lineHeight: 16,
   },
   errorText: {
     color: colors.danger,

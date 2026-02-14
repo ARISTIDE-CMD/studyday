@@ -1,4 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
+import { useFocusEffect } from '@react-navigation/native';
 import { Image } from 'expo-image';
 import { router } from 'expo-router';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
@@ -8,7 +9,7 @@ import { StateBlock } from '@/components/ui/state-block';
 import { useAppTheme } from '@/hooks/use-app-theme';
 import { useI18n } from '@/hooks/use-i18n';
 import { getErrorMessage } from '@/lib/errors';
-import { fetchDashboardSummary } from '@/lib/student-api';
+import { fetchDashboardSummary, getCachedDashboardSummary } from '@/lib/student-api';
 import { formatDateLabel, humanNow } from '@/lib/format';
 import { useAuth } from '@/providers/auth-provider';
 import type { Announcement, Task } from '@/types/supabase';
@@ -75,29 +76,46 @@ export default function HomeDashboardScreen() {
     setAvatarImageError(false);
   }, [avatarUrl]);
 
+  const applySummary = useCallback((summary: Awaited<ReturnType<typeof fetchDashboardSummary>>) => {
+    setTodoCount(summary.todoCount);
+    setOverdueCount(summary.overdueCount);
+    setNextTasks(summary.tasks.filter((task) => task.status !== 'done').slice(0, 3));
+    setLatestAnnouncement(summary.latestAnnouncement);
+  }, []);
+
   const loadData = useCallback(async () => {
     if (!user?.id) return;
+
+    let hasCachedData = false;
 
     try {
       setLoading(true);
       setError('');
 
+      const cached = await getCachedDashboardSummary(user.id);
+      hasCachedData = cached.tasks.length > 0 || cached.latestAnnouncement !== null;
+      if (hasCachedData) {
+        applySummary(cached);
+        setLoading(false);
+      }
+
       const summary = await fetchDashboardSummary(user.id);
-      setTodoCount(summary.todoCount);
-      setOverdueCount(summary.overdueCount);
-      setNextTasks(summary.tasks.filter((task) => task.status !== 'done').slice(0, 3));
-      setLatestAnnouncement(summary.latestAnnouncement);
+      applySummary(summary);
     } catch (err) {
-      const message = getErrorMessage(err, t('home.dashboardLoadError'));
-      setError(message);
+      if (!hasCachedData) {
+        const message = getErrorMessage(err, t('home.dashboardLoadError'));
+        setError(message);
+      }
     } finally {
       setLoading(false);
     }
-  }, [t, user?.id]);
+  }, [applySummary, t, user?.id]);
 
-  useEffect(() => {
-    void loadData();
-  }, [loadData]);
+  useFocusEffect(
+    useCallback(() => {
+      void loadData();
+    }, [loadData])
+  );
 
   return (
     <View style={styles.page}>

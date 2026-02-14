@@ -1,5 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import { Image } from 'expo-image';
+import * as ImagePicker from 'expo-image-picker';
 import { router } from 'expo-router';
 import React, { useMemo, useState } from 'react';
 import {
@@ -19,7 +20,11 @@ import { useAppTheme } from '@/hooks/use-app-theme';
 import { useI18n } from '@/hooks/use-i18n';
 import { getErrorMessage } from '@/lib/errors';
 import { supabase } from '@/lib/supabase';
-import { isSupabaseBucketPublicUrl, uploadRemoteAssetToBucket } from '@/lib/supabase-storage-api';
+import {
+  isSupabaseBucketPublicUrl,
+  uploadLocalAssetToBucket,
+  uploadRemoteAssetToBucket,
+} from '@/lib/supabase-storage-api';
 import { useAuth } from '@/providers/auth-provider';
 
 function normalize(value: string): string {
@@ -57,10 +62,29 @@ export default function ProfileEditorScreen() {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const [avatarUploading, setAvatarUploading] = useState(false);
+  const [avatarPicking, setAvatarPicking] = useState(false);
   const [showToast, setShowToast] = useState(false);
   const styles = useMemo(() => createStyles(colors, cardShadow), [cardShadow, colors]);
 
   const hasAvatar = !!normalize(avatarUrl) && !imageError;
+
+  const persistAvatar = async (uploadedUrl: string) => {
+    if (!user?.id) return;
+
+    const { error: authError } = await supabase.auth.updateUser({
+      data: {
+        avatar_url: uploadedUrl,
+      },
+    });
+    if (authError) throw authError;
+
+    const { error: profileError } = await supabase
+      .from('profiles')
+      .upsert({ id: user.id, avatar_url: uploadedUrl }, { onConflict: 'id' });
+    if (profileError) throw profileError;
+
+    await refreshProfile();
+  };
 
   const onUploadAvatar = async () => {
     if (!user?.id) return;
@@ -86,24 +110,51 @@ export default function ProfileEditorScreen() {
 
       setAvatarUrl(uploadedUrl);
       setImageError(false);
-
-      const { error: authError } = await supabase.auth.updateUser({
-        data: {
-          avatar_url: uploadedUrl,
-        },
-      });
-      if (authError) throw authError;
-
-      const { error: profileError } = await supabase
-        .from('profiles')
-        .upsert({ id: user.id, avatar_url: uploadedUrl }, { onConflict: 'id' });
-      if (profileError) throw profileError;
-
-      await refreshProfile();
+      await persistAvatar(uploadedUrl);
     } catch (err) {
       setError(getErrorMessage(err, t('profileEditor.uploadError')));
     } finally {
       setAvatarUploading(false);
+    }
+  };
+
+  const onPickAvatarFromPhone = async () => {
+    if (!user?.id) return;
+
+    setError('');
+    setAvatarPicking(true);
+
+    try {
+      const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (!permission.granted) {
+        setError(t('profileEditor.mediaPermissionDenied'));
+        return;
+      }
+
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        allowsEditing: true,
+        quality: 0.9,
+      });
+      if (result.canceled || !result.assets.length) return;
+
+      const asset = result.assets[0];
+      const uploadedUrl = await uploadLocalAssetToBucket({
+        bucket: 'images',
+        fileUri: asset.uri,
+        userId: user.id,
+        folder: 'avatars',
+        fileName: asset.fileName ?? undefined,
+        contentType: asset.mimeType ?? null,
+      });
+
+      setAvatarUrl(uploadedUrl);
+      setImageError(false);
+      await persistAvatar(uploadedUrl);
+    } catch (err) {
+      setError(getErrorMessage(err, t('profileEditor.uploadError')));
+    } finally {
+      setAvatarPicking(false);
     }
   };
 
@@ -186,6 +237,16 @@ export default function ProfileEditorScreen() {
         />
 
         <Text style={styles.label}>{t('profileEditor.fieldAvatarUrl')}</Text>
+        <TouchableOpacity
+          style={[styles.pickBtn, (avatarPicking || avatarUploading) && styles.saveBtnDisabled]}
+          onPress={() => void onPickAvatarFromPhone()}
+          disabled={avatarPicking || avatarUploading}>
+          {avatarPicking ? (
+            <ActivityIndicator color={colors.primary} />
+          ) : (
+            <Text style={styles.pickBtnText}>{t('profileEditor.pickAvatarButton')}</Text>
+          )}
+        </TouchableOpacity>
         <TextInput
           style={styles.input}
           value={avatarUrl}
@@ -198,9 +259,9 @@ export default function ProfileEditorScreen() {
           placeholderTextColor="#94A3B8"
         />
         <TouchableOpacity
-          style={[styles.uploadBtn, avatarUploading && styles.saveBtnDisabled]}
+          style={[styles.uploadBtn, (avatarUploading || avatarPicking) && styles.saveBtnDisabled]}
           onPress={() => void onUploadAvatar()}
-          disabled={avatarUploading}>
+          disabled={avatarUploading || avatarPicking}>
           {avatarUploading ? (
             <ActivityIndicator color="#FFFFFF" />
           ) : (
@@ -328,6 +389,20 @@ const createStyles = (
   },
   uploadBtnText: {
     color: '#FFFFFF',
+    fontWeight: '700',
+  },
+  pickBtn: {
+    marginBottom: 10,
+    height: 44,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.surface,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  pickBtnText: {
+    color: colors.text,
     fontWeight: '700',
   },
   saveBtnText: {

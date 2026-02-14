@@ -10,13 +10,12 @@ import { useAppTheme } from '@/hooks/use-app-theme';
 import { useI18n } from '@/hooks/use-i18n';
 import { getErrorMessage } from '@/lib/errors';
 import { formatDateLabel, toIsoDate } from '@/lib/format';
-import { deleteTask, fetchTasks, updateTask } from '@/lib/student-api';
+import { deleteTask, fetchTasks, getCachedTasks, updateTask } from '@/lib/student-api';
 import { useAuth } from '@/providers/auth-provider';
 import type { Task } from '@/types/supabase';
 
-type ViewState = 'auto' | 'loading' | 'empty' | 'error';
-type Filter = 'toutes' | 'a-faire' | 'terminees';
-type WindowFilter = 'aujourdhui' | 'semaine';
+type Filter = 'toutes' | 'a-faire' | 'archivees';
+type WindowFilter = 'toutes-dates' | 'aujourdhui' | 'semaine';
 
 function SwipeAction({ label, color }: { label: string; color: string }) {
   return (
@@ -42,11 +41,10 @@ export default function TasksScreen() {
   const { user } = useAuth();
   const { colors, cardShadow } = useAppTheme();
   const { t, locale } = useI18n();
-  const [stateOverride, setStateOverride] = useState<ViewState>('auto');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [filter, setFilter] = useState<Filter>('toutes');
-  const [windowFilter, setWindowFilter] = useState<WindowFilter>('aujourdhui');
+  const [windowFilter, setWindowFilter] = useState<WindowFilter>('toutes-dates');
   const [tasks, setTasks] = useState<Task[]>([]);
 
   const themedStyles = useMemo(() => createStyles(colors, cardShadow), [cardShadow, colors]);
@@ -62,14 +60,26 @@ export default function TasksScreen() {
   const loadTasks = useCallback(async () => {
     if (!user?.id) return;
 
+    let hasCachedData = false;
+
     try {
       setLoading(true);
       setError('');
+
+      const cached = await getCachedTasks(user.id);
+      hasCachedData = cached.length > 0;
+      if (hasCachedData) {
+        setTasks(cached);
+        setLoading(false);
+      }
+
       const data = await fetchTasks(user.id);
       setTasks(data);
     } catch (err) {
-      const message = getErrorMessage(err, t('tasks.loadError'));
-      setError(message);
+      if (!hasCachedData) {
+        const message = getErrorMessage(err, t('tasks.loadError'));
+        setError(message);
+      }
     } finally {
       setLoading(false);
     }
@@ -85,7 +95,7 @@ export default function TasksScreen() {
     let data = [...tasks];
 
     if (filter === 'a-faire') data = data.filter((task) => task.status !== 'done');
-    if (filter === 'terminees') data = data.filter((task) => task.status === 'done');
+    if (filter === 'archivees') data = data.filter((task) => task.status === 'done');
 
     if (windowFilter === 'aujourdhui') {
       data = data.filter((task) => task.due_date === toIsoDate());
@@ -98,22 +108,19 @@ export default function TasksScreen() {
     return data;
   }, [filter, tasks, windowFilter]);
 
-  const effectiveState = (() => {
-    if (stateOverride !== 'auto') return stateOverride;
-    if (loading) return 'loading';
-    if (error) return 'error';
-    if (!tasks.length) return 'empty';
-    return 'auto';
-  })();
+  const effectiveState = loading ? 'loading' : error ? 'error' : tasks.length === 0 ? 'empty' : 'auto';
 
   const toggleTask = async (task: Task) => {
     if (!user?.id) return;
 
     const nextStatus = task.status === 'done' ? 'todo' : 'done';
-    setTasks((prev) => prev.map((row) => (row.id === task.id ? { ...row, status: nextStatus } : row)));
+    const completedAt = nextStatus === 'done' ? new Date().toISOString() : null;
+    setTasks((prev) =>
+      prev.map((row) => (row.id === task.id ? { ...row, status: nextStatus, completed_at: completedAt } : row))
+    );
 
     try {
-      await updateTask(task.id, user.id, { status: nextStatus });
+      await updateTask(task.id, user.id, { status: nextStatus, completed_at: completedAt });
     } catch {
       setTasks((prev) => prev.map((row) => (row.id === task.id ? task : row)));
       Alert.alert(t('common.networkErrorTitle'), t('tasks.updateError'));
@@ -137,10 +144,11 @@ export default function TasksScreen() {
   const filterLabels: { key: Filter; label: string }[] = [
     { key: 'toutes', label: t('tasks.filterAll') },
     { key: 'a-faire', label: t('tasks.filterTodo') },
-    { key: 'terminees', label: t('tasks.filterDone') },
+    { key: 'archivees', label: t('tasks.filterArchived') },
   ];
 
   const windowLabels: { key: WindowFilter; label: string }[] = [
+    { key: 'toutes-dates', label: t('tasks.windowAll') },
     { key: 'aujourdhui', label: t('common.today') },
     { key: 'semaine', label: t('common.week') },
   ];
@@ -156,19 +164,6 @@ export default function TasksScreen() {
           <TouchableOpacity style={themedStyles.addBtn} onPress={() => router.push('/task-editor')}>
             <Ionicons name="add" size={22} color="#FFFFFF" />
           </TouchableOpacity>
-        </View>
-
-        <View style={themedStyles.stateRow}>
-          {(['auto', 'loading', 'empty', 'error'] as ViewState[]).map((state) => (
-            <TouchableOpacity
-              key={state}
-              style={[themedStyles.stateChip, stateOverride === state && themedStyles.stateChipActive]}
-              onPress={() => setStateOverride(state)}>
-              <Text style={[themedStyles.stateChipText, stateOverride === state && themedStyles.stateChipTextActive]}>
-                {t(`states.${state}`)}
-              </Text>
-            </TouchableOpacity>
-          ))}
         </View>
 
         <View style={themedStyles.filterRow}>
@@ -191,6 +186,11 @@ export default function TasksScreen() {
               <Text style={[themedStyles.windowText, windowFilter === item.key && themedStyles.windowTextActive]}>{item.label}</Text>
             </TouchableOpacity>
           ))}
+        </View>
+
+        <View style={themedStyles.noticeBox}>
+          <Ionicons name="information-circle-outline" size={16} color={colors.primary} />
+          <Text style={themedStyles.noticeText}>{t('tasks.archiveNotice')}</Text>
         </View>
 
         {effectiveState === 'loading' ? (
@@ -217,10 +217,7 @@ export default function TasksScreen() {
             title={t('common.networkErrorTitle')}
             description={error || t('tasks.loadError')}
             actionLabel={t('common.retry')}
-            onActionPress={() => {
-              setStateOverride('auto');
-              void loadTasks();
-            }}
+            onActionPress={() => void loadTasks()}
           />
         ) : null}
 
@@ -323,33 +320,6 @@ const createStyles = (
       alignItems: 'center',
       justifyContent: 'center',
     },
-    stateRow: {
-      flexDirection: 'row',
-      flexWrap: 'wrap',
-      gap: 8,
-      marginBottom: 10,
-    },
-    stateChip: {
-      borderWidth: 1,
-      borderColor: colors.border,
-      borderRadius: 999,
-      paddingHorizontal: 10,
-      paddingVertical: 5,
-      backgroundColor: colors.surface,
-    },
-    stateChipActive: {
-      backgroundColor: colors.primarySoft,
-      borderColor: colors.primary,
-    },
-    stateChipText: {
-      color: colors.textMuted,
-      fontSize: 12,
-      textTransform: 'capitalize',
-    },
-    stateChipTextActive: {
-      color: colors.primary,
-      fontWeight: '700',
-    },
     filterRow: {
       flexDirection: 'row',
       gap: 8,
@@ -377,7 +347,7 @@ const createStyles = (
     windowRow: {
       flexDirection: 'row',
       gap: 8,
-      marginBottom: 14,
+      marginBottom: 10,
     },
     windowChip: {
       borderRadius: 10,
@@ -398,6 +368,24 @@ const createStyles = (
     },
     windowTextActive: {
       color: colors.primary,
+    },
+    noticeBox: {
+      marginBottom: 14,
+      borderWidth: 1,
+      borderColor: colors.primarySoft,
+      borderRadius: 12,
+      backgroundColor: colors.surface,
+      paddingHorizontal: 10,
+      paddingVertical: 9,
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 8,
+    },
+    noticeText: {
+      flex: 1,
+      color: colors.textMuted,
+      fontSize: 12,
+      lineHeight: 17,
     },
     stackGap: {
       gap: 10,

@@ -1,4 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
+import * as DocumentPicker from 'expo-document-picker';
 import { router, useLocalSearchParams } from 'expo-router';
 import React, { useEffect, useMemo, useState } from 'react';
 import {
@@ -17,7 +18,11 @@ import { Toast } from '@/components/ui/toast';
 import { useAppTheme } from '@/hooks/use-app-theme';
 import { useI18n } from '@/hooks/use-i18n';
 import { getErrorMessage } from '@/lib/errors';
-import { isSupabaseBucketPublicUrl, uploadRemoteAssetToBucket } from '@/lib/supabase-storage-api';
+import {
+  isSupabaseBucketPublicUrl,
+  uploadLocalAssetToBucket,
+  uploadRemoteAssetToBucket,
+} from '@/lib/supabase-storage-api';
 import {
   createResource,
   fetchResourceById,
@@ -42,6 +47,7 @@ export default function ResourceEditorScreen() {
   const [screenLoading, setScreenLoading] = useState(false);
   const [loading, setLoading] = useState(false);
   const [fileUploading, setFileUploading] = useState(false);
+  const [filePicking, setFilePicking] = useState(false);
   const [error, setError] = useState('');
   const [showToast, setShowToast] = useState(false);
   const styles = useMemo(() => createStyles(colors), [colors]);
@@ -147,6 +153,41 @@ export default function ResourceEditorScreen() {
     }
   };
 
+  const onPickFileFromPhone = async () => {
+    if (!user?.id) return;
+
+    setError('');
+    setFilePicking(true);
+
+    try {
+      const result = await DocumentPicker.getDocumentAsync({
+        multiple: false,
+        copyToCacheDirectory: true,
+        type: '*/*',
+      });
+      if (result.canceled || !result.assets.length) return;
+
+      const asset = result.assets[0];
+      const uploadedUrl = await uploadLocalAssetToBucket({
+        bucket: 'files',
+        fileUri: asset.uri,
+        userId: user.id,
+        folder: 'resources',
+        fileName: asset.name,
+        contentType: asset.mimeType ?? null,
+      });
+
+      setFileUrl(uploadedUrl);
+      if (!title.trim()) {
+        setTitle(asset.name.replace(/\.[^./\\]+$/, ''));
+      }
+    } catch (err) {
+      setError(getErrorMessage(err, t('resourceEditor.uploadError')));
+    } finally {
+      setFilePicking(false);
+    }
+  };
+
   return (
     <KeyboardAvoidingView style={styles.page} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
@@ -190,6 +231,16 @@ export default function ResourceEditorScreen() {
             <Text style={styles.label}>{type === 'file' ? t('resourceEditor.fileUrlLabel') : t('resourceEditor.contentLabel')}</Text>
             {type === 'file' ? (
               <>
+                <TouchableOpacity
+                  style={[styles.pickBtn, (filePicking || fileUploading) && styles.saveBtnDisabled]}
+                  onPress={() => void onPickFileFromPhone()}
+                  disabled={filePicking || fileUploading}>
+                  {filePicking ? (
+                    <ActivityIndicator color={colors.primary} />
+                  ) : (
+                    <Text style={styles.pickBtnText}>{t('resourceEditor.pickFileButton')}</Text>
+                  )}
+                </TouchableOpacity>
                 <TextInput
                   style={styles.input}
                   value={fileUrl}
@@ -198,9 +249,9 @@ export default function ResourceEditorScreen() {
                   placeholderTextColor="#94A3B8"
                 />
                 <TouchableOpacity
-                  style={[styles.uploadBtn, fileUploading && styles.saveBtnDisabled]}
+                  style={[styles.uploadBtn, (fileUploading || filePicking) && styles.saveBtnDisabled]}
                   onPress={() => void onUploadFile()}
-                  disabled={fileUploading}>
+                  disabled={fileUploading || filePicking}>
                   {fileUploading ? (
                     <ActivityIndicator color="#FFFFFF" />
                   ) : (
@@ -348,6 +399,20 @@ const createStyles = (colors: ReturnType<typeof useAppTheme>['colors']) =>
   },
   uploadBtnText: {
     color: '#FFFFFF',
+    fontWeight: '700',
+  },
+  pickBtn: {
+    marginBottom: 10,
+    height: 44,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.surface,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  pickBtnText: {
+    color: colors.text,
     fontWeight: '700',
   },
   saveBtnText: {
