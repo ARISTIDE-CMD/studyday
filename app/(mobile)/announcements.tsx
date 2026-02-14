@@ -1,0 +1,245 @@
+import { Ionicons } from '@expo/vector-icons';
+import { useFocusEffect } from '@react-navigation/native';
+import { router } from 'expo-router';
+import React, { useCallback, useMemo, useState } from 'react';
+import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+
+import { StateBlock } from '@/components/ui/state-block';
+import { useAppTheme } from '@/hooks/use-app-theme';
+import { useI18n } from '@/hooks/use-i18n';
+import { getErrorMessage } from '@/lib/errors';
+import { formatDateLabel } from '@/lib/format';
+import { fetchAnnouncements } from '@/lib/student-api';
+import type { Announcement } from '@/types/supabase';
+
+type ViewState = 'auto' | 'loading' | 'empty' | 'error';
+
+export default function AnnouncementsScreen() {
+  const { colors, cardShadow } = useAppTheme();
+  const { t, locale } = useI18n();
+  const [stateOverride, setStateOverride] = useState<ViewState>('auto');
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const [announcements, setAnnouncements] = useState<Announcement[]>([]);
+
+  const styles = useMemo(() => createStyles(colors, cardShadow), [cardShadow, colors]);
+
+  const loadAnnouncements = useCallback(async () => {
+    try {
+      setLoading(true);
+      setError('');
+      const data = await fetchAnnouncements();
+      setAnnouncements(data);
+    } catch (err) {
+      const message = getErrorMessage(err, t('announcements.loadError'));
+      setError(message);
+    } finally {
+      setLoading(false);
+    }
+  }, [t]);
+
+  useFocusEffect(
+    useCallback(() => {
+      void loadAnnouncements();
+    }, [loadAnnouncements])
+  );
+
+  const effectiveState = (() => {
+    if (stateOverride !== 'auto') return stateOverride;
+    if (loading) return 'loading';
+    if (error) return 'error';
+    if (!announcements.length) return 'empty';
+    return 'auto';
+  })();
+
+  return (
+    <View style={styles.page}>
+      <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+        <View style={styles.header}>
+          <Text style={styles.title}>{t('announcements.title')}</Text>
+          <Ionicons name="notifications-outline" size={22} color={colors.text} />
+        </View>
+
+        <View style={styles.stateRow}>
+          {(['auto', 'loading', 'empty', 'error'] as ViewState[]).map((state) => (
+            <TouchableOpacity
+              key={state}
+              style={[styles.stateChip, stateOverride === state && styles.stateChipActive]}
+              onPress={() => setStateOverride(state)}>
+              <Text style={[styles.stateChipText, stateOverride === state && styles.stateChipTextActive]}>{t(`states.${state}`)}</Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+
+        {effectiveState === 'loading' ? (
+          <View style={styles.stackGap}>
+            {[1, 2, 3].map((placeholder) => (
+              <View key={placeholder} style={styles.skeletonCard} />
+            ))}
+          </View>
+        ) : null}
+
+        {effectiveState === 'empty' ? (
+          <StateBlock
+            variant="empty"
+            title={t('announcements.emptyTitle')}
+            description={t('announcements.emptyDescription')}
+          />
+        ) : null}
+
+        {effectiveState === 'error' ? (
+          <StateBlock
+            variant="error"
+            title={t('common.networkErrorTitle')}
+            description={error || t('announcements.loadError')}
+            actionLabel={t('common.retry')}
+            onActionPress={() => {
+              setStateOverride('auto');
+              void loadAnnouncements();
+            }}
+          />
+        ) : null}
+
+        {effectiveState === 'auto' ? (
+          <View style={styles.stackGap}>
+            {announcements.map((announcement) => (
+              <TouchableOpacity
+                key={announcement.id}
+                style={styles.card}
+                onPress={() => router.push(`/announcement/${announcement.id}`)}>
+                <View style={styles.cardHeader}>
+                  <Text style={styles.cardTitle}>{announcement.title}</Text>
+                  {announcement.is_important ? (
+                    <View style={styles.importantBadge}>
+                      <Text style={styles.importantText}>{t('common.important')}</Text>
+                    </View>
+                  ) : null}
+                </View>
+
+                <Text style={styles.date}>{formatDateLabel(announcement.created_at, locale, t('common.noDate'))}</Text>
+                <Text style={styles.excerpt} numberOfLines={3}>{announcement.content}</Text>
+                <View style={styles.readRow}>
+                  <Text style={styles.readText}>{t('common.details')}</Text>
+                  <Ionicons name="chevron-forward" size={16} color={colors.primary} />
+                </View>
+              </TouchableOpacity>
+            ))}
+          </View>
+        ) : null}
+      </ScrollView>
+    </View>
+  );
+}
+
+const createStyles = (
+  colors: ReturnType<typeof useAppTheme>['colors'],
+  cardShadow: ReturnType<typeof useAppTheme>['cardShadow']
+) =>
+  StyleSheet.create({
+    page: {
+      flex: 1,
+      backgroundColor: colors.background,
+    },
+    content: {
+      paddingTop: 56,
+      paddingHorizontal: 16,
+      paddingBottom: 110,
+    },
+    header: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      marginBottom: 14,
+    },
+    title: {
+      fontSize: 28,
+      fontWeight: '800',
+      color: colors.text,
+    },
+    stateRow: {
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+      gap: 8,
+      marginBottom: 14,
+    },
+    stateChip: {
+      borderWidth: 1,
+      borderColor: colors.border,
+      borderRadius: 999,
+      paddingHorizontal: 10,
+      paddingVertical: 5,
+      backgroundColor: colors.surface,
+    },
+    stateChipActive: {
+      backgroundColor: colors.primarySoft,
+      borderColor: colors.primary,
+    },
+    stateChipText: {
+      color: colors.textMuted,
+      fontSize: 12,
+      textTransform: 'capitalize',
+    },
+    stateChipTextActive: {
+      color: colors.primary,
+      fontWeight: '700',
+    },
+    stackGap: {
+      gap: 10,
+    },
+    skeletonCard: {
+      height: 128,
+      borderRadius: 14,
+      backgroundColor: colors.border,
+    },
+    card: {
+      backgroundColor: colors.surface,
+      borderRadius: 14,
+      borderWidth: 1,
+      borderColor: colors.border,
+      padding: 14,
+      ...cardShadow,
+    },
+    cardHeader: {
+      flexDirection: 'row',
+      alignItems: 'flex-start',
+      justifyContent: 'space-between',
+      gap: 8,
+      marginBottom: 8,
+    },
+    cardTitle: {
+      flex: 1,
+      color: colors.text,
+      fontWeight: '800',
+      fontSize: 16,
+    },
+    importantBadge: {
+      backgroundColor: colors.warningSoft,
+      borderRadius: 999,
+      paddingHorizontal: 8,
+      paddingVertical: 4,
+    },
+    importantText: {
+      color: colors.warning,
+      fontWeight: '700',
+      fontSize: 11,
+    },
+    date: {
+      color: colors.textMuted,
+      marginBottom: 8,
+    },
+    excerpt: {
+      color: colors.textMuted,
+      lineHeight: 20,
+      marginBottom: 10,
+    },
+    readRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      alignSelf: 'flex-start',
+      gap: 4,
+    },
+    readText: {
+      color: colors.primary,
+      fontWeight: '700',
+    },
+  });
