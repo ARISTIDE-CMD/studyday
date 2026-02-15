@@ -5,6 +5,7 @@ import { router } from 'expo-router';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 
+import { ResourceFileIcon } from '@/components/ui/resource-file-icon';
 import { StateBlock } from '@/components/ui/state-block';
 import { useAppTheme } from '@/hooks/use-app-theme';
 import { useI18n } from '@/hooks/use-i18n';
@@ -72,14 +73,6 @@ export default function HomeDashboardScreen() {
       low: { bg: colors.successSoft, color: colors.success, label: t('priority.low') },
     }),
     [colors.danger, colors.dangerSoft, colors.success, colors.successSoft, colors.warning, colors.warningSoft, t]
-  );
-  const resourceIconByType = useMemo(
-    () => ({
-      note: { icon: 'document-text-outline' as const, bg: colors.primarySoft, color: colors.primary },
-      link: { icon: 'link-outline' as const, bg: colors.successSoft, color: colors.success },
-      file: { icon: 'document-outline' as const, bg: colors.warningSoft, color: colors.warning },
-    }),
-    [colors.primary, colors.primarySoft, colors.success, colors.successSoft, colors.warning, colors.warningSoft]
   );
 
   useEffect(() => {
@@ -250,15 +243,12 @@ export default function HomeDashboardScreen() {
               />
             ) : (
               latestResources.map((resource) => {
-                const tone = resourceIconByType[resource.type ?? 'note'];
                 return (
                   <TouchableOpacity
                     key={resource.id}
                     style={styles.resourceCard}
-                    onPress={() => router.push(`/resource-editor?resourceId=${resource.id}`)}>
-                    <View style={[styles.resourceIconWrap, { backgroundColor: tone.bg }]}>
-                      <Ionicons name={tone.icon} size={17} color={tone.color} />
-                    </View>
+                    onPress={() => router.push(`/resource/${resource.id}`)}>
+                    <ResourceFileIcon resource={resource} size={34} style={styles.resourceIconWrap} />
                     <View style={styles.resourceMain}>
                       <Text style={styles.resourceTitle}>{resource.title}</Text>
                       <Text style={styles.resourceMeta}>{formatDateLabel(resource.created_at, locale, t('common.noDate'))}</Text>

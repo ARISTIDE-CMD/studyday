@@ -41,6 +41,7 @@ function RootNavigator() {
         <Stack.Screen name="resource-editor" options={{ presentation: 'modal' }} />
         <Stack.Screen name="profile-editor" options={{ presentation: 'modal' }} />
         <Stack.Screen name="task/[id]" />
+        <Stack.Screen name="resource/[id]" />
         <Stack.Screen name="announcement/[id]" />
       </Stack>
       <StatusBar style={isDark ? 'light' : 'dark'} />

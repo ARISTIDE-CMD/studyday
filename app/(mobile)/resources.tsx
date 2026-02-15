@@ -5,6 +5,7 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Alert, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import Swipeable from 'react-native-gesture-handler/Swipeable';
 
+import { ResourceFileIcon } from '@/components/ui/resource-file-icon';
 import { StateBlock } from '@/components/ui/state-block';
 import { useAppTheme } from '@/hooks/use-app-theme';
 import { useI18n } from '@/hooks/use-i18n';
@@ -15,12 +16,6 @@ import { useAuth } from '@/providers/auth-provider';
 import type { Resource } from '@/types/supabase';
 
 type ResourceFilter = 'tout' | 'note' | 'link' | 'file';
-
-const typeMeta = {
-  note: { icon: 'document-text-outline' as const },
-  link: { icon: 'link-outline' as const },
-  file: { icon: 'document-outline' as const },
-};
 
 function SwipeAction({ label, color }: { label: string; color: string }) {
   return (
@@ -242,9 +237,6 @@ export default function ResourcesScreen() {
               />
             ) : (
               filtered.map((resource) => {
-                const tone = typeMeta[resource.type ?? 'note'];
-                const iconBg = resource.type === 'file' ? colors.warningSoft : resource.type === 'link' ? colors.successSoft : colors.primarySoft;
-                const iconColor = resource.type === 'file' ? colors.warning : resource.type === 'link' ? colors.success : colors.primary;
                 const selected = selectedResourceIds.includes(resource.id);
 
                 const card = (
@@ -259,7 +251,7 @@ export default function ResourcesScreen() {
                         toggleSelection(resource.id);
                         return;
                       }
-                      router.push(`/resource-editor?resourceId=${resource.id}`);
+                      router.push(`/resource/${resource.id}`);
                     }}>
                     {isSelectionMode ? (
                       <TouchableOpacity
@@ -269,9 +261,7 @@ export default function ResourcesScreen() {
                       </TouchableOpacity>
                     ) : null}
 
-                    <View style={[styles.iconWrap, { backgroundColor: iconBg }]}>
-                      <Ionicons name={tone.icon} size={18} color={iconColor} />
-                    </View>
+                    <ResourceFileIcon resource={resource} size={36} style={styles.iconWrap} />
 
                     <View style={styles.cardMain}>
                       <Text style={styles.resourceTitle}>{resource.title}</Text>
