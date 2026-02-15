@@ -5,6 +5,7 @@ import {
   createLocalId,
   enqueueOutboxOperation,
   getLocalProfileById,
+  getOutboxOperations,
   removeLocalProfile,
   setLocalProfile,
 } from '@/lib/offline-store';
@@ -60,12 +61,15 @@ function resolveProfileMetadata(user: User): { fullName: string | null; avatarUr
 async function upsertProfile(user: User): Promise<Profile | null> {
   const { fullName, avatarUrl } = resolveProfileMetadata(user);
 
-  const { error } = await supabase
+  const { error: bootstrapError } = await supabase
     .from('profiles')
-    .upsert({ id: user.id, full_name: fullName, avatar_url: avatarUrl }, { onConflict: 'id' });
+    .upsert(
+      { id: user.id, full_name: fullName, avatar_url: avatarUrl },
+      { onConflict: 'id', ignoreDuplicates: true }
+    );
 
-  if (error) {
-    throw error;
+  if (bootstrapError) {
+    throw bootstrapError;
   }
 
   const { data, error: fetchError } = await supabase
@@ -78,7 +82,34 @@ async function upsertProfile(user: User): Promise<Profile | null> {
     throw fetchError;
   }
 
-  return data ?? null;
+  if (!data) {
+    return null;
+  }
+
+  const patch: Partial<Profile> = {};
+  if (!data.full_name && fullName) {
+    patch.full_name = fullName;
+  }
+  if (!data.avatar_url && avatarUrl) {
+    patch.avatar_url = avatarUrl;
+  }
+
+  if (Object.keys(patch).length === 0) {
+    return data;
+  }
+
+  const { data: patched, error: patchError } = await supabase
+    .from('profiles')
+    .update(patch)
+    .eq('id', user.id)
+    .select('id, full_name, avatar_url, role, created_at')
+    .maybeSingle<Profile>();
+
+  if (patchError) {
+    throw patchError;
+  }
+
+  return patched ?? { ...data, ...patch };
 }
 
 function fallbackNameFromUser(user: User): string {
@@ -92,6 +123,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [shouldShowPostLoginIntro, setShouldShowPostLoginIntro] = useState(false);
   const [loading, setLoading] = useState(true);
 
+  const hasPendingProfileSync = useCallback(async (userId: string) => {
+    const operations = await getOutboxOperations(userId);
+    return operations.some((operation) => operation.entity === 'profile' && operation.action === 'upsert');
+  }, []);
+
   const refreshProfile = useCallback(async () => {
     if (!session?.user) {
       setProfile(null);
@@ -104,17 +140,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
 
     try {
+      const pendingProfileSync = await hasPendingProfileSync(session.user.id);
       const data = await upsertProfile(session.user);
-      if (data) {
+      if (data && !pendingProfileSync) {
         await setLocalProfile(session.user.id, data);
       }
-      setProfile(data ?? cached ?? null);
+      setProfile(pendingProfileSync ? (cached ?? data ?? null) : (data ?? cached ?? null));
     } catch {
       if (!cached) {
         setProfile(null);
       }
     }
-  }, [session?.user]);
+  }, [hasPendingProfileSync, session?.user]);
 
   const saveProfileLocalFirst = useCallback(async (patch: { full_name?: string | null; avatar_url?: string | null }) => {
     if (!session?.user) {
@@ -171,11 +208,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         }
 
         try {
+          const pendingProfileSync = await hasPendingProfileSync(data.session.user.id);
           const dataProfile = await upsertProfile(data.session.user);
-          if (dataProfile) {
+          if (dataProfile && !pendingProfileSync) {
             await setLocalProfile(data.session.user.id, dataProfile);
           }
-          if (active) setProfile(dataProfile ?? cachedProfile ?? null);
+          if (active) {
+            setProfile(
+              pendingProfileSync
+                ? (cachedProfile ?? dataProfile ?? null)
+                : (dataProfile ?? cachedProfile ?? null)
+            );
+          }
         } catch {
           if (active && !cachedProfile) setProfile(null);
         }
@@ -207,11 +251,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         }
 
         try {
+          const pendingProfileSync = await hasPendingProfileSync(nextSession.user.id);
           const dataProfile = await upsertProfile(nextSession.user);
-          if (dataProfile) {
+          if (dataProfile && !pendingProfileSync) {
             await setLocalProfile(nextSession.user.id, dataProfile);
           }
-          if (active) setProfile(dataProfile ?? cachedProfile ?? null);
+          if (active) {
+            setProfile(
+              pendingProfileSync
+                ? (cachedProfile ?? dataProfile ?? null)
+                : (dataProfile ?? cachedProfile ?? null)
+            );
+          }
         } catch {
           if (active && !cachedProfile) setProfile(null);
         } finally {

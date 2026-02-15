@@ -338,7 +338,7 @@ export default function ProfileScreen() {
                 { borderColor: isOnline ? colors.success : colors.danger },
               ]}>
             {avatarUrl ? (
-              <Image source={avatarUrl} style={themedStyles.avatarImage} contentFit="cover" />
+              <Image source={avatarUrl} style={themedStyles.avatarImage} contentFit="cover" cachePolicy="none" />
             ) : (
               <Ionicons name="person" size={26} color={colors.primary} />
             )}

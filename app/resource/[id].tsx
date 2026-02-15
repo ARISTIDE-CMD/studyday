@@ -41,6 +41,8 @@ export default function ResourceDetailScreen() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [resource, setResource] = useState<Resource | null>(null);
+  const [previewLoading, setPreviewLoading] = useState(false);
+  const [openingExternal, setOpeningExternal] = useState(false);
   const styles = useMemo(() => createStyles(colors), [colors]);
 
   useEffect(() => {
@@ -82,6 +84,10 @@ export default function ResourceDetailScreen() {
   const contentValue = resource?.content?.trim() || '';
   const isImage = resourceKind === 'image';
 
+  useEffect(() => {
+    setPreviewLoading(Boolean(isImage && externalUrl));
+  }, [externalUrl, isImage]);
+
   const openLabel = useMemo(() => {
     if (resourceKind === 'link') return t('resourceDetail.openLink');
     if (resourceKind === 'image') return t('resourceDetail.openImage');
@@ -94,10 +100,13 @@ export default function ResourceDetailScreen() {
       return;
     }
 
+    setOpeningExternal(true);
     try {
       await Linking.openURL(externalUrl);
     } catch {
       Alert.alert(t('common.genericError'), t('resourceDetail.openError'));
+    } finally {
+      setOpeningExternal(false);
     }
   };
 
@@ -178,7 +187,21 @@ export default function ResourceDetailScreen() {
 
             {isImage && externalUrl ? (
               <TouchableOpacity style={styles.previewWrap} onPress={() => void onOpenExternal()}>
-                <Image source={externalUrl} style={styles.previewImage} contentFit="cover" />
+                <Image
+                  source={externalUrl}
+                  style={styles.previewImage}
+                  contentFit="cover"
+                  cachePolicy="none"
+                  transition={120}
+                  onLoadStart={() => setPreviewLoading(true)}
+                  onLoad={() => setPreviewLoading(false)}
+                  onError={() => setPreviewLoading(false)}
+                />
+                {previewLoading ? (
+                  <View style={styles.previewLoaderOverlay}>
+                    <ActivityIndicator color="#FFFFFF" />
+                  </View>
+                ) : null}
               </TouchableOpacity>
             ) : null}
 
@@ -192,12 +215,24 @@ export default function ResourceDetailScreen() {
 
             {externalUrl ? (
               <View style={styles.actionRow}>
-                <TouchableOpacity style={styles.openButton} onPress={() => void onOpenExternal()}>
-                  <Ionicons name="open-outline" size={16} color="#FFFFFF" />
-                  <Text style={styles.openButtonText}>{openLabel}</Text>
+                <TouchableOpacity
+                  style={[styles.openButton, openingExternal && styles.actionDisabled]}
+                  onPress={() => void onOpenExternal()}
+                  disabled={openingExternal}>
+                  {openingExternal ? (
+                    <ActivityIndicator size="small" color="#FFFFFF" />
+                  ) : (
+                    <>
+                      <Ionicons name="open-outline" size={16} color="#FFFFFF" />
+                      <Text style={styles.openButtonText}>{openLabel}</Text>
+                    </>
+                  )}
                 </TouchableOpacity>
 
-                <TouchableOpacity style={styles.shareButton} onPress={() => void onShare()}>
+                <TouchableOpacity
+                  style={[styles.shareButton, openingExternal && styles.actionDisabled]}
+                  onPress={() => void onShare()}
+                  disabled={openingExternal}>
                   <Ionicons name="share-social-outline" size={16} color={colors.text} />
                   <Text style={styles.shareButtonText}>{t('resourceDetail.share')}</Text>
                 </TouchableOpacity>
@@ -312,6 +347,16 @@ const createStyles = (colors: ReturnType<typeof useAppTheme>['colors']) =>
       width: '100%',
       height: 220,
     },
+    previewLoaderOverlay: {
+      position: 'absolute',
+      top: 0,
+      right: 0,
+      bottom: 0,
+      left: 0,
+      alignItems: 'center',
+      justifyContent: 'center',
+      backgroundColor: 'rgba(17, 24, 39, 0.26)',
+    },
     sectionTitle: {
       color: colors.text,
       fontWeight: '700',
@@ -351,6 +396,9 @@ const createStyles = (colors: ReturnType<typeof useAppTheme>['colors']) =>
       alignItems: 'center',
       marginBottom: 10,
       flexWrap: 'wrap',
+    },
+    actionDisabled: {
+      opacity: 0.7,
     },
     shareButton: {
       borderRadius: 10,

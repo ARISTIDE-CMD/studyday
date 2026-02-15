@@ -529,6 +529,7 @@ export default function HomeDashboardScreen() {
                       source={avatarUrl}
                       style={styles.avatarImage}
                       contentFit="cover"
+                      cachePolicy="none"
                       onError={() => setAvatarImageError(true)}
                     />
                   ) : (

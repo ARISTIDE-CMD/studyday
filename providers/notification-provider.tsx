@@ -16,6 +16,7 @@ import {
   getActivityNotifications,
   markActivityNotificationAsRead,
   markAllActivityNotificationsAsRead,
+  removeActivityNotification as persistRemoveActivityNotification,
   type ActivityNotificationEntity,
   type ActivityNotificationItem,
 } from '@/lib/activity-notifications';
@@ -46,6 +47,7 @@ type NotificationContextValue = {
     message: string;
   }) => Promise<void>;
   markActivityAsRead: (notificationId: string) => Promise<void>;
+  removeActivity: (notificationId: string) => Promise<void>;
   markAllActivityAsRead: () => Promise<void>;
 };
 
@@ -139,6 +141,15 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
     [user?.id]
   );
 
+  const removeActivity = useCallback(
+    async (notificationId: string) => {
+      if (!user?.id) return;
+      const updated = await persistRemoveActivityNotification(user.id, notificationId);
+      setActivityNotifications(updated);
+    },
+    [user?.id]
+  );
+
   const unreadActivityCount = useMemo(
     () => activityNotifications.filter((item) => !item.readAt).length,
     [activityNotifications]
@@ -182,6 +193,7 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
       unreadActivityCount,
       addActivityNotification,
       markActivityAsRead,
+      removeActivity,
       markAllActivityAsRead,
     }),
     [
@@ -189,6 +201,7 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
       addActivityNotification,
       dismissNotification,
       markActivityAsRead,
+      removeActivity,
       markAllActivityAsRead,
       showNotification,
       unreadActivityCount,

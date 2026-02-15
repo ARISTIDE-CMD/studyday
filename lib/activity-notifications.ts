@@ -219,3 +219,14 @@ export async function markActivityNotificationAsRead(
   });
   return sortNotifications(nextState.notificationsByUser[userId] ?? []);
 }
+
+export async function removeActivityNotification(
+  userId: string,
+  notificationId: string
+): Promise<ActivityNotificationItem[]> {
+  const nextState = await updateState((state) => {
+    const list = pruneNotifications(state.notificationsByUser[userId] ?? []);
+    state.notificationsByUser[userId] = list.filter((item) => item.id !== notificationId);
+  });
+  return sortNotifications(nextState.notificationsByUser[userId] ?? []);
+}

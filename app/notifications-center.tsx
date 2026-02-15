@@ -1,7 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
-import { useFocusEffect } from '@react-navigation/native';
 import { router } from 'expo-router';
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 
 import { StateBlock } from '@/components/ui/state-block';
@@ -13,15 +12,9 @@ import { useInAppNotification } from '@/providers/notification-provider';
 export default function NotificationsCenterScreen() {
   const { colors } = useAppTheme();
   const { t, locale } = useI18n();
-  const { activityNotifications, markAllActivityAsRead, markActivityAsRead } = useInAppNotification();
+  const { activityNotifications, markAllActivityAsRead, removeActivity } = useInAppNotification();
   const [filter, setFilter] = useState<'all' | 'unread'>('all');
   const styles = useMemo(() => createStyles(colors), [colors]);
-
-  useFocusEffect(
-    useCallback(() => {
-      void markAllActivityAsRead();
-    }, [markAllActivityAsRead])
-  );
 
   const unreadCount = useMemo(
     () => activityNotifications.filter((item) => !item.readAt).length,
@@ -37,7 +30,7 @@ export default function NotificationsCenterScreen() {
   );
 
   const onView = async (notificationId: string, entityType: 'task' | 'resource', entityId: string) => {
-    await markActivityAsRead(notificationId);
+    await removeActivity(notificationId);
     if (entityType === 'task') {
       router.push(`/task/${entityId}`);
       return;

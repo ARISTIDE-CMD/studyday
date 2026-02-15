@@ -8,6 +8,7 @@ import {
   getLocalResources,
   getLocalTaskById,
   getLocalTasks,
+  getOutboxOperations,
   getOutboxSize,
   removeLocalResource,
   removeLocalTask,
@@ -433,7 +434,18 @@ export async function fetchResourceById(userId: string, resourceId: string) {
     await upsertLocalResource(userId, data);
   }
 
-  return data;
+  if (!localResource) {
+    return data;
+  }
+
+  const outbox = await getOutboxOperations(userId);
+  const hasPendingResourceForId = outbox.some((operation) => {
+    if (operation.entity !== 'resource') return false;
+    if (operation.action === 'upsert') return operation.record.id === resourceId;
+    return operation.recordId === resourceId;
+  });
+
+  return hasPendingResourceForId ? localResource : data;
 }
 
 export async function createResource(input: {

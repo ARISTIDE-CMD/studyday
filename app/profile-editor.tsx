@@ -20,13 +20,14 @@ import { useAppTheme } from '@/hooks/use-app-theme';
 import { useI18n } from '@/hooks/use-i18n';
 import { getErrorMessage } from '@/lib/errors';
 import { useAuth } from '@/providers/auth-provider';
+import { useOfflineSyncStatus } from '@/providers/offline-sync-provider';
 
 function normalize(value: string): string {
   return value.trim();
 }
 
 function isAcceptedAvatarSource(value: string): boolean {
-  return /^(https?:\/\/|file:\/\/|content:\/\/|ph:\/\/|assets-library:\/\/)/i.test(value.trim());
+  return /^(https?:\/\/|file:\/{1,3}|content:\/\/|ph:\/\/|assets-library:\/\/|blob:|data:|\/)/i.test(value.trim());
 }
 
 function extractFirstName(email: string | null | undefined, fallback: string): string {
@@ -35,6 +36,7 @@ function extractFirstName(email: string | null | undefined, fallback: string): s
 
 export default function ProfileEditorScreen() {
   const { user, profile, saveProfileLocalFirst } = useAuth();
+  const { triggerSync } = useOfflineSyncStatus();
   const { colors, cardShadow } = useAppTheme();
   const { t } = useI18n();
 
@@ -81,7 +83,7 @@ export default function ProfileEditorScreen() {
       const result = await ImagePicker.launchImageLibraryAsync({
         mediaTypes: ImagePicker.MediaTypeOptions.Images,
         allowsEditing: true,
-        quality: 0.9,
+        quality: 0.68,
       });
       if (result.canceled || !result.assets.length) return;
 
@@ -114,12 +116,16 @@ export default function ProfileEditorScreen() {
         full_name: nextName,
         avatar_url: nextAvatarUrl || null,
       });
+
+      // Local-first: update UI immediately, then sync in background.
+      void triggerSync();
+
       setShowToast(true);
 
       setTimeout(() => {
         setShowToast(false);
         router.back();
-      }, 900);
+      }, 550);
     } catch (err) {
       setError(getErrorMessage(err, t('profileEditor.saveError')));
     } finally {
@@ -145,6 +151,7 @@ export default function ProfileEditorScreen() {
               source={normalize(avatarUrl)}
               style={styles.avatarImage}
               contentFit="cover"
+              cachePolicy="none"
               onError={() => setImageError(true)}
             />
           ) : (
