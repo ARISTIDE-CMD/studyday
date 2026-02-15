@@ -1,7 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
 import { router } from 'expo-router';
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, RefreshControl, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import Swipeable from 'react-native-gesture-handler/Swipeable';
 
@@ -57,6 +57,7 @@ export default function TasksScreen() {
     task: Task;
     timeoutId: ReturnType<typeof setTimeout>;
   } | null>(null);
+  const swipeRefs = useRef<Record<string, Swipeable | null>>({});
 
   const themedStyles = useMemo(() => createStyles(colors, cardShadow), [cardShadow, colors]);
   const priorityStyle = useMemo(
@@ -289,6 +290,19 @@ export default function TasksScreen() {
     }
   };
 
+  const closeAllSwipeables = useCallback((exceptTaskId?: string) => {
+    const entries = Object.entries(swipeRefs.current);
+    for (const [taskId, instance] of entries) {
+      if (!instance) continue;
+      if (exceptTaskId && taskId === exceptTaskId) continue;
+      try {
+        instance.close();
+      } catch {
+        // Ignore stale refs.
+      }
+    }
+  }, []);
+
   const filterLabels: { key: Filter; label: string }[] = [
     { key: 'toutes', label: t('tasks.filterAll') },
     { key: 'a-faire', label: t('tasks.filterTodo') },
@@ -313,6 +327,7 @@ export default function TasksScreen() {
       <ScrollView
         contentContainerStyle={themedStyles.content}
         showsVerticalScrollIndicator={false}
+        onScrollBeginDrag={() => closeAllSwipeables()}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => void onRefresh()} tintColor={colors.primary} />}>
         <View style={themedStyles.header}>
           <View>
@@ -490,6 +505,10 @@ export default function TasksScreen() {
                 return (
                   <Swipeable
                     key={task.id}
+                    ref={(instance) => {
+                      swipeRefs.current[task.id] = instance;
+                    }}
+                    onSwipeableWillOpen={() => closeAllSwipeables(task.id)}
                     renderLeftActions={() => <SwipeAction label={t('tasks.swipeEdit')} color={colors.success} />}
                     onSwipeableLeftOpen={() => router.push(`/task-editor?taskId=${task.id}`)}
                     renderRightActions={() => <SwipeAction label={t('tasks.swipeDelete')} color={colors.danger} />}
@@ -757,7 +776,7 @@ const createStyles = (
       position: 'absolute',
       left: 14,
       right: 14,
-      bottom: 18,
+      bottom: 94,
       borderRadius: 12,
       borderWidth: 1,
       borderColor: colors.border,

@@ -1,6 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
+import { useFocusEffect } from '@react-navigation/native';
 import { router } from 'expo-router';
-import React, { useMemo, useState } from 'react';
+import React, { useCallback, useMemo, useState } from 'react';
 import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 
 import { StateBlock } from '@/components/ui/state-block';
@@ -15,6 +16,12 @@ export default function NotificationsCenterScreen() {
   const { activityNotifications, markAllActivityAsRead, markActivityAsRead } = useInAppNotification();
   const [filter, setFilter] = useState<'all' | 'unread'>('all');
   const styles = useMemo(() => createStyles(colors), [colors]);
+
+  useFocusEffect(
+    useCallback(() => {
+      void markAllActivityAsRead();
+    }, [markAllActivityAsRead])
+  );
 
   const unreadCount = useMemo(
     () => activityNotifications.filter((item) => !item.readAt).length,

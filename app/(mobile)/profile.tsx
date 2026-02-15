@@ -5,6 +5,8 @@ import { router } from 'expo-router';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
+  Animated,
+  Easing,
   LayoutAnimation,
   Platform,
   ScrollView,
@@ -17,9 +19,11 @@ import {
 } from 'react-native';
 
 import { TabSwipeShell } from '@/components/ui/tab-swipe-shell';
+import { useConnectivity } from '@/hooks/use-connectivity';
 import { useAppTheme } from '@/hooks/use-app-theme';
 import { useI18n } from '@/hooks/use-i18n';
 import { getErrorMessage } from '@/lib/errors';
+import { getFocusStats } from '@/lib/focus-stats';
 import { formatDateLabel } from '@/lib/format';
 import type { ThemeMode } from '@/lib/settings-storage';
 import { fetchTaskStats, fetchTasks, getCachedTaskStats, getCachedTasks } from '@/lib/student-api';
@@ -142,6 +146,7 @@ function SettingChip({
 
 export default function ProfileScreen() {
   const { user, profile, refreshProfile, signOut } = useAuth();
+  const isOnline = useConnectivity();
   const { language, themeMode, syncMode, setLanguage, setThemeMode, setSyncMode, settingsLoading } = useSettings();
   const { isSyncing, triggerSync } = useOfflineSyncStatus();
   const { colors, cardShadow } = useAppTheme();
@@ -151,15 +156,30 @@ export default function ProfileScreen() {
   const [doneTasks, setDoneTasks] = useState(0);
   const [weekDoneTasks, setWeekDoneTasks] = useState(0);
   const [streakDays, setStreakDays] = useState(0);
+  const [focusWeekSessions, setFocusWeekSessions] = useState(0);
+  const [focusTotalSessions, setFocusTotalSessions] = useState(0);
+  const [focusStreakDays, setFocusStreakDays] = useState(0);
   const [statsError, setStatsError] = useState('');
   const [preferencesOpen, setPreferencesOpen] = useState(false);
   const [securityOpen, setSecurityOpen] = useState(false);
+  const avatarPulse = React.useRef(new Animated.Value(0)).current;
   const registrationDate = profile?.created_at ?? user?.created_at ?? null;
   const avatarUrl = profile?.avatar_url?.trim()
     || (typeof user?.user_metadata?.avatar_url === 'string' ? user.user_metadata.avatar_url.trim() : '');
   const completionRate = totalTasks > 0 ? doneTasks / totalTasks : 0;
   const pendingTasks = Math.max(totalTasks - doneTasks, 0);
   const weeklyGoal = 5;
+  const badges = useMemo(
+    () =>
+      [
+        { key: 'first_task', unlocked: doneTasks >= 1, label: t('profile.badgeFirstTask') },
+        { key: 'weekly_goal', unlocked: weekDoneTasks >= weeklyGoal, label: t('profile.badgeWeeklyGoal') },
+        { key: 'streak7', unlocked: streakDays >= 7, label: t('profile.badgeStreak7') },
+        { key: 'focus5', unlocked: focusTotalSessions >= 5, label: t('profile.badgeFocus5') },
+        { key: 'focus_streak', unlocked: focusStreakDays >= 3, label: t('profile.badgeFocusStreak') },
+      ] as { key: string; unlocked: boolean; label: string }[],
+    [doneTasks, focusStreakDays, focusTotalSessions, streakDays, t, weekDoneTasks]
+  );
 
   const themedStyles = useMemo(() => createStyles(colors, cardShadow), [cardShadow, colors]);
 
@@ -168,6 +188,40 @@ export default function ProfileScreen() {
       UIManager.setLayoutAnimationEnabledExperimental(true);
     }
   }, []);
+
+  useEffect(() => {
+    const loop = Animated.loop(
+      Animated.timing(avatarPulse, {
+        toValue: 1,
+        duration: 2100,
+        easing: Easing.inOut(Easing.sin),
+        useNativeDriver: true,
+      })
+    );
+    loop.start();
+    return () => {
+      loop.stop();
+      avatarPulse.stopAnimation();
+    };
+  }, [avatarPulse]);
+
+  const avatarPulseStyle = useMemo(
+    () => ({
+      opacity: avatarPulse.interpolate({
+        inputRange: [0, 1],
+        outputRange: [0.4, 0],
+      }),
+      transform: [
+        {
+          scale: avatarPulse.interpolate({
+            inputRange: [0, 1],
+            outputRange: [1, 1.2],
+          }),
+        },
+      ],
+    }),
+    [avatarPulse]
+  );
 
   const loadStats = useCallback(async () => {
     if (!user?.id) return;
@@ -180,8 +234,12 @@ export default function ProfileScreen() {
         getCachedTaskStats(user.id),
         getCachedTasks(user.id),
       ]);
+      const cachedFocusStats = await getFocusStats(user.id);
       setTotalTasks(cachedStats.total);
       setDoneTasks(cachedStats.done);
+      setFocusWeekSessions(cachedFocusStats.weekSessions);
+      setFocusTotalSessions(cachedFocusStats.totalSessions);
+      setFocusStreakDays(cachedFocusStats.streakDays);
 
       const weekStart = new Date();
       weekStart.setHours(0, 0, 0, 0);
@@ -208,8 +266,12 @@ export default function ProfileScreen() {
         fetchTaskStats(user.id),
         fetchTasks(user.id),
       ]);
+      const remoteFocusStats = await getFocusStats(user.id);
       setTotalTasks(stats.total);
       setDoneTasks(stats.done);
+      setFocusWeekSessions(remoteFocusStats.weekSessions);
+      setFocusTotalSessions(remoteFocusStats.totalSessions);
+      setFocusStreakDays(remoteFocusStats.streakDays);
 
       const remoteDoneDates = new Set(
         remoteTasks
@@ -261,12 +323,32 @@ export default function ProfileScreen() {
         <Text style={themedStyles.title}>{t('profile.title')}</Text>
 
         <View style={themedStyles.profileCard}>
-          <View style={themedStyles.avatar}>
+          <View style={themedStyles.avatarWrap}>
+            <Animated.View
+              pointerEvents="none"
+              style={[
+                themedStyles.avatarPulseRing,
+                avatarPulseStyle,
+                { borderColor: isOnline ? colors.success : colors.danger },
+              ]}
+            />
+            <View
+              style={[
+                themedStyles.avatar,
+                { borderColor: isOnline ? colors.success : colors.danger },
+              ]}>
             {avatarUrl ? (
               <Image source={avatarUrl} style={themedStyles.avatarImage} contentFit="cover" />
             ) : (
               <Ionicons name="person" size={26} color={colors.primary} />
             )}
+            </View>
+            <View
+              style={[
+                themedStyles.avatarStatusDot,
+                { backgroundColor: isOnline ? colors.success : colors.danger, borderColor: colors.surface },
+              ]}
+            />
           </View>
           <Text style={themedStyles.name}>{profile?.full_name ?? t('profile.fallbackName')}</Text>
           <Text style={themedStyles.email}>{user?.email ?? t('profile.unknownEmail')}</Text>
@@ -319,6 +401,40 @@ export default function ProfileScreen() {
                 </View>
               </View>
 
+              <View style={themedStyles.kpiRow}>
+                <View style={themedStyles.kpiCard}>
+                  <Text style={themedStyles.kpiTitle}>{t('profile.focusWeekTitle')}</Text>
+                  <Text style={themedStyles.kpiValue}>{t('profile.focusWeekValue', { count: focusWeekSessions })}</Text>
+                </View>
+
+                <View style={themedStyles.kpiCard}>
+                  <Text style={themedStyles.kpiTitle}>{t('profile.focusStreakTitle')}</Text>
+                  <Text style={themedStyles.kpiValue}>{t('profile.focusStreakValue', { count: focusStreakDays })}</Text>
+                </View>
+              </View>
+
+              <Text style={themedStyles.badgeSectionTitle}>{t('profile.badgesTitle')}</Text>
+              <View style={themedStyles.badgesWrap}>
+                {badges.map((badge) => (
+                  <View
+                    key={badge.key}
+                    style={[themedStyles.badgeChip, !badge.unlocked && themedStyles.badgeChipLocked]}>
+                    <Ionicons
+                      name={badge.unlocked ? 'ribbon' : 'lock-closed-outline'}
+                      size={12}
+                      color={badge.unlocked ? colors.warning : colors.textMuted}
+                    />
+                    <Text
+                      style={[
+                        themedStyles.badgeChipText,
+                        !badge.unlocked && themedStyles.badgeChipTextLocked,
+                      ]}>
+                      {badge.label}
+                    </Text>
+                  </View>
+                ))}
+              </View>
+
               <View style={themedStyles.metaRow}>
                 <Text style={themedStyles.metaTitle}>{t('profile.registrationDate')}</Text>
                 <Text style={themedStyles.metaValue}>{formatDateLabel(registrationDate, locale, t('common.noDate'))}</Text>
@@ -330,6 +446,10 @@ export default function ProfileScreen() {
 
         <TouchableOpacity style={themedStyles.primaryAction} onPress={() => router.push('/profile-editor')}>
           <Text style={themedStyles.primaryActionText}>{t('profile.editProfile')}</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity style={themedStyles.secondaryAction} onPress={() => router.push('/focus')}>
+          <Text style={themedStyles.secondaryActionText}>{t('profile.focusMode')}</Text>
         </TouchableOpacity>
 
         <View style={themedStyles.accordionCard}>
@@ -491,10 +611,35 @@ const createStyles = (
       height: 62,
       borderRadius: 31,
       backgroundColor: colors.primarySoft,
+      borderWidth: 1,
       justifyContent: 'center',
       alignItems: 'center',
-      marginBottom: 10,
       overflow: 'hidden',
+    },
+    avatarWrap: {
+      width: 62,
+      height: 62,
+      borderRadius: 31,
+      marginBottom: 10,
+      alignItems: 'center',
+      justifyContent: 'center',
+      position: 'relative',
+    },
+    avatarPulseRing: {
+      position: 'absolute',
+      width: 62,
+      height: 62,
+      borderRadius: 31,
+      borderWidth: 2,
+    },
+    avatarStatusDot: {
+      position: 'absolute',
+      right: -1,
+      bottom: -1,
+      width: 12,
+      height: 12,
+      borderRadius: 6,
+      borderWidth: 2,
     },
     avatarImage: {
       width: '100%',
@@ -664,6 +809,20 @@ const createStyles = (
       color: '#FFFFFF',
       fontWeight: '700',
     },
+    secondaryAction: {
+      borderRadius: 12,
+      height: 46,
+      borderWidth: 1,
+      borderColor: colors.border,
+      backgroundColor: colors.surface,
+      justifyContent: 'center',
+      alignItems: 'center',
+      marginBottom: 12,
+    },
+    secondaryActionText: {
+      color: colors.text,
+      fontWeight: '700',
+    },
     dangerAction: {
       borderRadius: 12,
       height: 48,
@@ -746,5 +905,40 @@ const createStyles = (
       color: '#FFFFFF',
       fontWeight: '700',
       fontSize: 13,
+    },
+    badgeSectionTitle: {
+      color: colors.text,
+      fontWeight: '800',
+      fontSize: 14,
+      marginBottom: 8,
+    },
+    badgesWrap: {
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+      gap: 8,
+      marginBottom: 12,
+    },
+    badgeChip: {
+      borderRadius: 999,
+      borderWidth: 1,
+      borderColor: colors.warningSoft,
+      backgroundColor: colors.warningSoft,
+      paddingHorizontal: 10,
+      paddingVertical: 6,
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 6,
+    },
+    badgeChipLocked: {
+      borderColor: colors.border,
+      backgroundColor: colors.background,
+    },
+    badgeChipText: {
+      color: colors.text,
+      fontSize: 12,
+      fontWeight: '700',
+    },
+    badgeChipTextLocked: {
+      color: colors.textMuted,
     },
   });

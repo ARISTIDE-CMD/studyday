@@ -30,7 +30,7 @@ export function TabSwipeShell({ tab, children, style }: TabSwipeShellProps) {
         onMoveShouldSetPanResponder: (_evt, gestureState) => {
           const dx = Math.abs(gestureState.dx);
           const dy = Math.abs(gestureState.dy);
-          return dx > 68 && dx > dy * 1.4;
+          return dx > 24 && dx > dy * 1.15;
         },
         onPanResponderRelease: (_evt, gestureState) => {
           if (navigateLock.current) return;
@@ -39,9 +39,9 @@ export function TabSwipeShell({ tab, children, style }: TabSwipeShellProps) {
           if (tabIndex < 0) return;
 
           const swipeLeft =
-            gestureState.dx < -78 || (gestureState.dx < -24 && gestureState.vx < -0.32);
+            gestureState.dx < -54 || (gestureState.dx < -18 && gestureState.vx < -0.24);
           const swipeRight =
-            gestureState.dx > 78 || (gestureState.dx > 24 && gestureState.vx > 0.32);
+            gestureState.dx > 54 || (gestureState.dx > 18 && gestureState.vx > 0.24);
 
           if (!swipeLeft && !swipeRight) return;
 
@@ -55,7 +55,7 @@ export function TabSwipeShell({ tab, children, style }: TabSwipeShellProps) {
           router.replace(TAB_ROUTE[TAB_ORDER[nextIndex]]);
           setTimeout(() => {
             navigateLock.current = false;
-          }, 260);
+          }, 220);
         },
       }),
     [router, tab]
@@ -63,7 +63,7 @@ export function TabSwipeShell({ tab, children, style }: TabSwipeShellProps) {
 
   return (
     <View style={[styles.container, style]} {...panResponder.panHandlers}>
-      {children}
+      <View style={styles.container}>{children}</View>
     </View>
   );
 }
@@ -73,4 +73,3 @@ const styles = StyleSheet.create({
     flex: 1,
   },
 });
-

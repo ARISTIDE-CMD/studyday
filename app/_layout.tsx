@@ -10,6 +10,7 @@ import { AuthProvider } from '@/providers/auth-provider';
 import { NotificationProvider } from '@/providers/notification-provider';
 import { OfflineSyncProvider } from '@/providers/offline-sync-provider';
 import { SettingsProvider } from '@/providers/settings-provider';
+import { TaskReminderProvider } from '@/providers/task-reminder-provider';
 
 function RootNavigator() {
   const { colors, isDark } = useAppTheme();
@@ -68,6 +69,7 @@ function RootNavigator() {
         <Stack.Screen name="task/[id]" />
         <Stack.Screen name="resource/[id]" />
         <Stack.Screen name="announcement/[id]" />
+        <Stack.Screen name="focus" />
         <Stack.Screen name="notifications-center" />
         <Stack.Screen name="search" />
       </Stack>
@@ -83,7 +85,9 @@ export default function RootLayout() {
         <SettingsProvider>
           <OfflineSyncProvider>
             <NotificationProvider>
-              <RootNavigator />
+              <TaskReminderProvider>
+                <RootNavigator />
+              </TaskReminderProvider>
             </NotificationProvider>
           </OfflineSyncProvider>
         </SettingsProvider>

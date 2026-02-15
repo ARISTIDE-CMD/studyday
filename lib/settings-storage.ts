@@ -17,7 +17,7 @@ const FILE_PATH = FileSystem.documentDirectory
   : null;
 
 export const defaultSettings: AppSettings = {
-  themeMode: 'system',
+  themeMode: 'light',
   language: 'fr',
   syncMode: 'auto',
 };

@@ -720,7 +720,7 @@ const createStyles = (
       position: 'absolute',
       left: 14,
       right: 14,
-      bottom: 18,
+      bottom: 94,
       borderRadius: 12,
       borderWidth: 1,
       borderColor: colors.border,

@@ -9,6 +9,7 @@ import { ResourceFileIcon } from '@/components/ui/resource-file-icon';
 import { StateBlock } from '@/components/ui/state-block';
 import { TabSwipeShell } from '@/components/ui/tab-swipe-shell';
 import { SyncStatusBanner } from '@/components/ui/sync-status-banner';
+import { useConnectivity } from '@/hooks/use-connectivity';
 import { useAppTheme } from '@/hooks/use-app-theme';
 import { useI18n } from '@/hooks/use-i18n';
 import { loadAppFlags, saveAppFlags } from '@/lib/app-flags';
@@ -23,6 +24,7 @@ import type { Announcement, Resource, Task } from '@/types/supabase';
 export default function HomeDashboardScreen() {
   const { user, profile } = useAuth();
   const { unreadActivityCount } = useInAppNotification();
+  const isOnline = useConnectivity();
   const { colors, cardShadow } = useAppTheme();
   const { t, locale } = useI18n();
   const [loading, setLoading] = useState(true);
@@ -83,7 +85,6 @@ export default function HomeDashboardScreen() {
       .join('');
     return value || 'E';
   }, [displayName]);
-  const isConnected = Boolean(user?.id);
   const styles = useMemo(() => createStyles(colors, cardShadow), [cardShadow, colors]);
   const priorityStyle = useMemo(
     () => ({
@@ -514,13 +515,13 @@ export default function HomeDashboardScreen() {
                 style={[
                   styles.avatarPulseRing,
                   avatarPulseStyle,
-                  { borderColor: isConnected ? colors.success : colors.danger },
+                  { borderColor: isOnline ? colors.success : colors.danger },
                 ]}
               />
               <View
                 style={[
                   styles.avatarOuter,
-                  { borderColor: isConnected ? colors.success : colors.danger },
+                  { borderColor: isOnline ? colors.success : colors.danger },
                 ]}>
                 <View style={styles.avatarInner}>
                   {avatarUrl && !avatarImageError ? (
@@ -539,7 +540,7 @@ export default function HomeDashboardScreen() {
                 style={[
                   styles.avatarStatusDot,
                   {
-                    backgroundColor: isConnected ? colors.success : colors.danger,
+                    backgroundColor: isOnline ? colors.success : colors.danger,
                     borderColor: colors.surface,
                   },
                 ]}
@@ -1127,7 +1128,7 @@ const createStyles = (
   fab: {
     position: 'absolute',
     right: 18,
-    bottom: 88,
+    bottom: 104,
     width: 56,
     height: 56,
     borderRadius: 16,
@@ -1150,7 +1151,7 @@ const createStyles = (
   fabMenu: {
     position: 'absolute',
     right: 18,
-    bottom: 150,
+    bottom: 168,
     gap: 8,
     alignItems: 'flex-end',
   },

@@ -121,6 +121,10 @@ export default function TaskDetailScreen() {
             <Text style={styles.sectionTitle}>{t('taskDetail.description')}</Text>
             <Text style={styles.body}>{task.description?.trim() || t('taskDetail.noDescription')}</Text>
 
+            <TouchableOpacity style={styles.focusButton} onPress={() => router.push(`/focus?taskId=${task.id}`)}>
+              <Text style={styles.focusButtonText}>{t('taskDetail.focus')}</Text>
+            </TouchableOpacity>
+
             <TouchableOpacity style={styles.editButton} onPress={() => router.push(`/task-editor?taskId=${task.id}`)}>
               <Text style={styles.editButtonText}>{t('taskDetail.edit')}</Text>
             </TouchableOpacity>
@@ -209,9 +213,23 @@ const createStyles = (colors: ReturnType<typeof useAppTheme>['colors']) =>
       backgroundColor: colors.primary,
       paddingHorizontal: 14,
       paddingVertical: 10,
+      marginTop: 8,
     },
     editButtonText: {
       color: '#FFFFFF',
+      fontWeight: '700',
+    },
+    focusButton: {
+      alignSelf: 'flex-start',
+      borderRadius: 10,
+      borderWidth: 1,
+      borderColor: colors.border,
+      backgroundColor: colors.surface,
+      paddingHorizontal: 14,
+      paddingVertical: 10,
+    },
+    focusButtonText: {
+      color: colors.text,
       fontWeight: '700',
     },
   });
