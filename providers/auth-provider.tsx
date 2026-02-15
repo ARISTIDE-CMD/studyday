@@ -26,15 +26,43 @@ type AuthContextValue = {
 
 const AuthContext = createContext<AuthContextValue | undefined>(undefined);
 
-async function upsertProfile(user: User): Promise<Profile | null> {
+function pickString(value: unknown): string | null {
+  if (typeof value !== 'string') return null;
+  const trimmed = value.trim();
+  return trimmed ? trimmed : null;
+}
+
+function resolveProfileMetadata(user: User): { fullName: string | null; avatarUrl: string | null } {
+  const metadata = (user.user_metadata ?? {}) as Record<string, unknown>;
+
+  const givenName = pickString(metadata.given_name);
+  const familyName = pickString(metadata.family_name);
+  const combinedName =
+    givenName && familyName ? `${givenName} ${familyName}` : (givenName ?? familyName ?? null);
+
   const fullName =
-    typeof user.user_metadata?.full_name === 'string' && user.user_metadata.full_name.trim()
-      ? user.user_metadata.full_name.trim()
-      : user.email?.split('@')[0] ?? null;
+    pickString(metadata.full_name) ??
+    pickString(metadata.name) ??
+    pickString(metadata.display_name) ??
+    combinedName ??
+    user.email?.split('@')[0] ??
+    null;
+
+  const avatarUrl =
+    pickString(metadata.avatar_url) ??
+    pickString(metadata.picture) ??
+    pickString(metadata.photo_url) ??
+    null;
+
+  return { fullName, avatarUrl };
+}
+
+async function upsertProfile(user: User): Promise<Profile | null> {
+  const { fullName, avatarUrl } = resolveProfileMetadata(user);
 
   const { error } = await supabase
     .from('profiles')
-    .upsert({ id: user.id, full_name: fullName }, { onConflict: 'id' });
+    .upsert({ id: user.id, full_name: fullName, avatar_url: avatarUrl }, { onConflict: 'id' });
 
   if (error) {
     throw error;
@@ -54,10 +82,8 @@ async function upsertProfile(user: User): Promise<Profile | null> {
 }
 
 function fallbackNameFromUser(user: User): string {
-  const metadataName =
-    typeof user.user_metadata?.full_name === 'string' ? user.user_metadata.full_name.trim() : '';
-  if (metadataName) return metadataName;
-  return user.email?.split('@')[0] ?? 'Etudiant';
+  const metadata = resolveProfileMetadata(user);
+  return metadata.fullName ?? 'Etudiant';
 }
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
