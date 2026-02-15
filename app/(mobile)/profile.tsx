@@ -9,6 +9,7 @@ import {
   Platform,
   ScrollView,
   StyleSheet,
+  Switch,
   Text,
   TouchableOpacity,
   UIManager,
@@ -23,6 +24,7 @@ import { formatDateLabel } from '@/lib/format';
 import type { ThemeMode } from '@/lib/settings-storage';
 import { fetchTaskStats, fetchTasks, getCachedTaskStats, getCachedTasks } from '@/lib/student-api';
 import { useAuth } from '@/providers/auth-provider';
+import { useOfflineSyncStatus } from '@/providers/offline-sync-provider';
 import { useSettings } from '@/providers/settings-provider';
 
 function ActivityRing({
@@ -140,7 +142,8 @@ function SettingChip({
 
 export default function ProfileScreen() {
   const { user, profile, refreshProfile, signOut } = useAuth();
-  const { language, themeMode, setLanguage, setThemeMode, settingsLoading } = useSettings();
+  const { language, themeMode, syncMode, setLanguage, setThemeMode, setSyncMode, settingsLoading } = useSettings();
+  const { isSyncing, triggerSync } = useOfflineSyncStatus();
   const { colors, cardShadow } = useAppTheme();
   const { t, locale } = useI18n();
   const [loading, setLoading] = useState(true);
@@ -368,6 +371,35 @@ export default function ProfileScreen() {
                   ))}
                 </View>
               )}
+
+              <Text style={themedStyles.settingsLabel}>{t('profile.syncTitle')}</Text>
+              <View style={themedStyles.syncRow}>
+                <View style={themedStyles.syncTextWrap}>
+                  <Text style={themedStyles.syncLabel}>{t('profile.syncAutoLabel')}</Text>
+                  <Text style={themedStyles.syncHint}>
+                    {syncMode === 'auto' ? t('profile.syncAutoEnabled') : t('profile.syncAutoDisabled')}
+                  </Text>
+                </View>
+                <Switch
+                  value={syncMode === 'auto'}
+                  onValueChange={(value) => setSyncMode(value ? 'auto' : 'manual')}
+                  trackColor={{ false: colors.border, true: colors.primarySoft }}
+                  thumbColor={syncMode === 'auto' ? colors.primary : '#FFFFFF'}
+                />
+              </View>
+
+              {syncMode === 'manual' ? (
+                <TouchableOpacity
+                  style={[themedStyles.syncNowBtn, isSyncing && themedStyles.syncNowBtnDisabled]}
+                  disabled={isSyncing}
+                  onPress={() => void triggerSync()}>
+                  {isSyncing ? (
+                    <ActivityIndicator size="small" color="#FFFFFF" />
+                  ) : (
+                    <Text style={themedStyles.syncNowBtnText}>{t('profile.syncNow')}</Text>
+                  )}
+                </TouchableOpacity>
+              ) : null}
             </View>
           ) : null}
         </View>
@@ -676,5 +708,43 @@ const createStyles = (
       color: colors.textMuted,
       fontSize: 12,
       lineHeight: 18,
+    },
+    syncRow: {
+      marginTop: 4,
+      marginBottom: 8,
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      gap: 10,
+    },
+    syncTextWrap: {
+      flex: 1,
+      gap: 2,
+    },
+    syncLabel: {
+      color: colors.text,
+      fontWeight: '700',
+      fontSize: 13,
+    },
+    syncHint: {
+      color: colors.textMuted,
+      fontSize: 12,
+      lineHeight: 17,
+    },
+    syncNowBtn: {
+      borderRadius: 10,
+      backgroundColor: colors.primary,
+      minHeight: 42,
+      alignItems: 'center',
+      justifyContent: 'center',
+      marginTop: 2,
+    },
+    syncNowBtnDisabled: {
+      opacity: 0.6,
+    },
+    syncNowBtnText: {
+      color: '#FFFFFF',
+      fontWeight: '700',
+      fontSize: 13,
     },
   });

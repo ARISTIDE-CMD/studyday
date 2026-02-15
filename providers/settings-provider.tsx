@@ -5,15 +5,18 @@ import {
   loadAppSettings,
   saveAppSettings,
   type AppLanguage,
+  type SyncMode,
   type ThemeMode,
 } from '@/lib/settings-storage';
 
 type SettingsContextValue = {
   language: AppLanguage;
   themeMode: ThemeMode;
+  syncMode: SyncMode;
   settingsLoading: boolean;
   setLanguage: (value: AppLanguage) => void;
   setThemeMode: (value: ThemeMode) => void;
+  setSyncMode: (value: SyncMode) => void;
 };
 
 const SettingsContext = createContext<SettingsContextValue | undefined>(undefined);
@@ -21,6 +24,7 @@ const SettingsContext = createContext<SettingsContextValue | undefined>(undefine
 export function SettingsProvider({ children }: { children: React.ReactNode }) {
   const [language, setLanguageState] = useState<AppLanguage>(defaultSettings.language);
   const [themeMode, setThemeModeState] = useState<ThemeMode>(defaultSettings.themeMode);
+  const [syncMode, setSyncModeState] = useState<SyncMode>(defaultSettings.syncMode);
   const [settingsLoading, setSettingsLoading] = useState(true);
 
   useEffect(() => {
@@ -31,6 +35,7 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
       if (!active) return;
       setLanguageState(loaded.language);
       setThemeModeState(loaded.themeMode);
+      setSyncModeState(loaded.syncMode);
       setSettingsLoading(false);
     })();
 
@@ -47,20 +52,26 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
     setThemeModeState(value);
   };
 
+  const setSyncMode = (value: SyncMode) => {
+    setSyncModeState(value);
+  };
+
   useEffect(() => {
     if (settingsLoading) return;
-    void saveAppSettings({ language, themeMode });
-  }, [language, settingsLoading, themeMode]);
+    void saveAppSettings({ language, themeMode, syncMode });
+  }, [language, settingsLoading, syncMode, themeMode]);
 
   const value = useMemo<SettingsContextValue>(
     () => ({
       language,
       themeMode,
+      syncMode,
       settingsLoading,
       setLanguage,
       setThemeMode,
+      setSyncMode,
     }),
-    [language, settingsLoading, themeMode]
+    [language, settingsLoading, syncMode, themeMode]
   );
 
   return <SettingsContext.Provider value={value}>{children}</SettingsContext.Provider>;

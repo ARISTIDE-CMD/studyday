@@ -23,11 +23,6 @@ import { useAppTheme } from '@/hooks/use-app-theme';
 import { useI18n } from '@/hooks/use-i18n';
 import { getErrorMessage } from '@/lib/errors';
 import {
-  isSupabaseBucketPublicUrl,
-  uploadLocalAssetToBucket,
-  uploadRemoteAssetToBucket,
-} from '@/lib/supabase-storage-api';
-import {
   createResource,
   fetchResourceById,
   getCachedResourceById,
@@ -81,7 +76,6 @@ export default function ResourceEditorScreen() {
   const [tags, setTags] = useState('revision, examen');
   const [screenLoading, setScreenLoading] = useState(false);
   const [loading, setLoading] = useState(false);
-  const [fileUploading, setFileUploading] = useState(false);
   const [filePicking, setFilePicking] = useState(false);
   const [error, setError] = useState('');
   const [toastMessage, setToastMessage] = useState('');
@@ -205,35 +199,6 @@ export default function ResourceEditorScreen() {
     }
   };
 
-  const onUploadFile = async () => {
-    if (!user?.id) return;
-    const source = fileUrl.trim();
-
-    if (!source) {
-      setError(t('resourceEditor.emptyFileUrl'));
-      return;
-    }
-
-    setError('');
-    setFileUploading(true);
-
-    try {
-      const uploadedUrl = isSupabaseBucketPublicUrl(source, 'files')
-        ? source
-        : await uploadRemoteAssetToBucket({
-            bucket: 'files',
-            sourceUrl: source,
-            userId: user.id,
-            folder: 'resources',
-          });
-      setFileUrl(uploadedUrl);
-    } catch (err) {
-      setError(getErrorMessage(err, t('resourceEditor.uploadError')));
-    } finally {
-      setFileUploading(false);
-    }
-  };
-
   const onPickFileFromPhone = async () => {
     if (!user?.id) return;
 
@@ -249,16 +214,7 @@ export default function ResourceEditorScreen() {
       if (result.canceled || !result.assets.length) return;
 
       const asset = result.assets[0];
-      const uploadedUrl = await uploadLocalAssetToBucket({
-        bucket: 'files',
-        fileUri: asset.uri,
-        userId: user.id,
-        folder: 'resources',
-        fileName: asset.name,
-        contentType: asset.mimeType ?? null,
-      });
-
-      setFileUrl(uploadedUrl);
+      setFileUrl(asset.uri);
       if (!title.trim()) {
         setTitle(asset.name.replace(/\.[^./\\]+$/, ''));
       }
@@ -416,9 +372,9 @@ export default function ResourceEditorScreen() {
             {type === 'file' ? (
               <>
                 <TouchableOpacity
-                  style={[styles.pickBtn, (filePicking || fileUploading) && styles.saveBtnDisabled]}
+                  style={[styles.pickBtn, filePicking && styles.saveBtnDisabled]}
                   onPress={() => void onPickFileFromPhone()}
-                  disabled={filePicking || fileUploading}>
+                  disabled={filePicking}>
                   {filePicking ? (
                     <ActivityIndicator color={colors.primary} />
                   ) : (
@@ -432,16 +388,6 @@ export default function ResourceEditorScreen() {
                   placeholder={t('resourceEditor.fileUrlPlaceholder')}
                   placeholderTextColor="#94A3B8"
                 />
-                <TouchableOpacity
-                  style={[styles.uploadBtn, (fileUploading || filePicking) && styles.saveBtnDisabled]}
-                  onPress={() => void onUploadFile()}
-                  disabled={fileUploading || filePicking}>
-                  {fileUploading ? (
-                    <ActivityIndicator color="#FFFFFF" />
-                  ) : (
-                    <Text style={styles.uploadBtnText}>{t('resourceEditor.uploadFileButton')}</Text>
-                  )}
-                </TouchableOpacity>
               </>
             ) : (
               <View style={styles.editorCard}>

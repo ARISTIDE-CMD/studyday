@@ -18,7 +18,7 @@ import {
   upsertLocalResource,
   upsertLocalTask,
 } from '@/lib/offline-store';
-import { isLikelyNetworkError, syncPendingOperations } from '@/lib/sync-engine';
+import { isLikelyNetworkError, shouldAutoSync, syncPendingOperations } from '@/lib/sync-engine';
 import { supabase } from '@/lib/supabase';
 import type { Announcement, Resource, Task } from '@/types/supabase';
 
@@ -169,6 +169,11 @@ function mergeById<T extends { id: string }>(remote: T[], local: T[]): T[] {
 
 async function trySyncSilently(userId?: string) {
   if (!userId) {
+    return;
+  }
+
+  const autoSyncEnabled = await shouldAutoSync();
+  if (!autoSyncEnabled) {
     return;
   }
 

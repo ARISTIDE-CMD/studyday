@@ -1,10 +1,15 @@
 import { getErrorMessage } from '@/lib/errors';
 import {
   getOutboxOperations,
+  setLocalProfile,
+  updateOutboxOperation,
+  upsertLocalResource,
   removeOutboxOperation,
   type OutboxOperation,
 } from '@/lib/offline-store';
+import { loadAppSettings } from '@/lib/settings-storage';
 import { supabase } from '@/lib/supabase';
+import { uploadLocalAssetToBucket } from '@/lib/supabase-storage-api';
 
 const networkErrorHints = [
   'network',
@@ -19,6 +24,26 @@ const networkErrorHints = [
 export function isLikelyNetworkError(error: unknown): boolean {
   const message = getErrorMessage(error, '').toLowerCase();
   return networkErrorHints.some((hint) => message.includes(hint));
+}
+
+function isLocalAssetUri(value: string | null | undefined): boolean {
+  if (!value) return false;
+  const normalized = value.trim();
+  if (!normalized) return false;
+  return /^(file|content|ph|assets-library):\/\//i.test(normalized);
+}
+
+function extractFileNameFromUri(uri: string, fallback: string): string {
+  const raw = uri.split('?')[0].split('#')[0];
+  const lastSegment = raw.split('/').pop() || '';
+  const sanitized = lastSegment.trim();
+  if (!sanitized) return fallback;
+  return sanitized;
+}
+
+export async function shouldAutoSync(): Promise<boolean> {
+  const settings = await loadAppSettings();
+  return settings.syncMode === 'auto';
 }
 
 function isMissingTaskArchiveColumnError(error: unknown): boolean {
@@ -45,7 +70,22 @@ async function syncOperation(operation: OutboxOperation): Promise<void> {
   }
 
   if (operation.entity === 'profile') {
-    const { error } = await supabase.from('profiles').upsert(operation.record, { onConflict: 'id' });
+    let record = operation.record;
+    const avatar = record.avatar_url?.trim() || null;
+    if (avatar && isLocalAssetUri(avatar)) {
+      const uploadedAvatar = await uploadLocalAssetToBucket({
+        bucket: 'images',
+        fileUri: avatar,
+        userId: operation.userId,
+        folder: 'avatars',
+        fileName: extractFileNameFromUri(avatar, 'avatar.jpg'),
+      });
+      record = { ...record, avatar_url: uploadedAvatar };
+      await setLocalProfile(operation.userId, record);
+      await updateOutboxOperation(operation.id, { ...operation, record });
+    }
+
+    const { error } = await supabase.from('profiles').upsert(record, { onConflict: 'id' });
     if (error) throw error;
     return;
   }
@@ -84,7 +124,22 @@ async function syncOperation(operation: OutboxOperation): Promise<void> {
   }
 
   if (operation.action === 'upsert') {
-    const { error } = await supabase.from('resources').upsert(operation.record, { onConflict: 'id' });
+    let record = operation.record;
+    const localFileUri = record.file_url?.trim() || null;
+    if (localFileUri && isLocalAssetUri(localFileUri)) {
+      const uploadedFile = await uploadLocalAssetToBucket({
+        bucket: 'files',
+        fileUri: localFileUri,
+        userId: operation.userId,
+        folder: 'resources',
+        fileName: extractFileNameFromUri(localFileUri, 'resource.bin'),
+      });
+      record = { ...record, file_url: uploadedFile };
+      await upsertLocalResource(operation.userId, record);
+      await updateOutboxOperation(operation.id, { ...operation, record });
+    }
+
+    const { error } = await supabase.from('resources').upsert(record, { onConflict: 'id' });
     if (error) throw error;
     return;
   }

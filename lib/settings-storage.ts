@@ -3,10 +3,12 @@ import { Platform } from 'react-native';
 
 export type ThemeMode = 'system' | 'light' | 'dark';
 export type AppLanguage = 'fr' | 'en';
+export type SyncMode = 'auto' | 'manual';
 
 export type AppSettings = {
   themeMode: ThemeMode;
   language: AppLanguage;
+  syncMode: SyncMode;
 };
 
 const STORAGE_KEY = 'studyday-app-settings-v1';
@@ -17,6 +19,7 @@ const FILE_PATH = FileSystem.documentDirectory
 export const defaultSettings: AppSettings = {
   themeMode: 'system',
   language: 'fr',
+  syncMode: 'auto',
 };
 
 function isThemeMode(value: unknown): value is ThemeMode {
@@ -25,6 +28,10 @@ function isThemeMode(value: unknown): value is ThemeMode {
 
 function isLanguage(value: unknown): value is AppLanguage {
   return value === 'fr' || value === 'en';
+}
+
+function isSyncMode(value: unknown): value is SyncMode {
+  return value === 'auto' || value === 'manual';
 }
 
 function normalizeSettings(value: unknown): AppSettings {
@@ -36,6 +43,7 @@ function normalizeSettings(value: unknown): AppSettings {
   return {
     themeMode: isThemeMode(raw.themeMode) ? raw.themeMode : defaultSettings.themeMode,
     language: isLanguage(raw.language) ? raw.language : defaultSettings.language,
+    syncMode: isSyncMode(raw.syncMode) ? raw.syncMode : defaultSettings.syncMode,
   };
 }
 

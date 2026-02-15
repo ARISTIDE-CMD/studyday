@@ -440,6 +440,14 @@ export async function removeOutboxOperation(operationId: string): Promise<void> 
   });
 }
 
+export async function updateOutboxOperation(operationId: string, operation: OutboxOperation): Promise<void> {
+  await updateState((state) => {
+    const index = state.outbox.findIndex((item) => item.id === operationId);
+    if (index === -1) return;
+    state.outbox[index] = operation;
+  });
+}
+
 export async function getOutboxSize(userId?: string): Promise<number> {
   const state = await loadState();
   if (!userId) {

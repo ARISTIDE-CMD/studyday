@@ -9,7 +9,6 @@ import {
   setLocalProfile,
 } from '@/lib/offline-store';
 import { supabase } from '@/lib/supabase';
-import { syncPendingOperations } from '@/lib/sync-engine';
 import type { Profile } from '@/types/supabase';
 
 type AuthContextValue = {
@@ -122,25 +121,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       record: nextProfile,
       createdAt: new Date().toISOString(),
     });
-
-    void (async () => {
-      try {
-        await supabase.auth.updateUser({
-          data: {
-            full_name: nextProfile.full_name,
-            avatar_url: nextProfile.avatar_url,
-          },
-        });
-      } catch {
-        // Keep local-first behavior.
-      }
-
-      try {
-        await syncPendingOperations(user.id);
-      } catch {
-        // Keep local-first behavior and retry later.
-      }
-    })();
   }, [profile, session?.user]);
 
   useEffect(() => {

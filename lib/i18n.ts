@@ -25,6 +25,8 @@ const dictionaries = {
     sync: {
       pending: '{count} element(s) en attente de synchronisation.',
       syncing: 'Synchronisation en cours ({count}).',
+      success: 'Synchronisation terminee ({count} element(s)).',
+      error: 'La synchronisation a echoue. Reessaie.',
     },
     nav: {
       home: 'Accueil',
@@ -280,6 +282,11 @@ const dictionaries = {
       privacyTitle: 'Politique de confidentialite',
       privacyDescription:
         'Tes donnees personnelles, taches et ressources restent privees: elles sont liees a ton compte et ne sont pas visibles par les autres utilisateurs.',
+      syncTitle: 'Synchronisation',
+      syncAutoLabel: 'Synchronisation automatique',
+      syncAutoEnabled: 'Les donnees locales sont synchronisees automatiquement.',
+      syncAutoDisabled: 'Synchronisation manuelle activee. Lance la sync avec le bouton ci-dessous.',
+      syncNow: 'Synchroniser maintenant',
     },
     taskEditor: {
       editTitle: 'Modifier tache',
@@ -387,6 +394,8 @@ const dictionaries = {
     sync: {
       pending: '{count} item(s) pending sync.',
       syncing: 'Sync in progress ({count}).',
+      success: 'Sync completed ({count} item(s)).',
+      error: 'Sync failed. Please try again.',
     },
     nav: {
       home: 'Home',
@@ -639,6 +648,11 @@ const dictionaries = {
       privacyTitle: 'Privacy policy',
       privacyDescription:
         'Your personal data, tasks, and resources stay private: they are tied to your account and not visible to other users.',
+      syncTitle: 'Synchronization',
+      syncAutoLabel: 'Automatic synchronization',
+      syncAutoEnabled: 'Local data is synchronized automatically.',
+      syncAutoDisabled: 'Manual sync enabled. Use the button below to start synchronization.',
+      syncNow: 'Sync now',
     },
     taskEditor: {
       editTitle: 'Edit task',
