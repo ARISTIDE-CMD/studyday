@@ -1,4 +1,4 @@
-import { Image } from 'expo-image';
+import { Ionicons } from '@expo/vector-icons';
 import { Redirect, router } from 'expo-router';
 import React, { useCallback, useEffect, useMemo, useRef } from 'react';
 import { ActivityIndicator, Animated, Easing, Pressable, StyleSheet, Text, View } from 'react-native';
@@ -175,15 +175,36 @@ export default function PostLoginScreen() {
           { opacity: cardOpacity, transform: [{ translateY: cardTranslate }, { scale: cardScale }] },
         ]}>
         <View style={styles.mediaRow}>
-          <View style={styles.heroImageWrap}>
-            <Image source={require('../assets/images/react-logo.png')} style={styles.heroImage} contentFit="contain" />
+          <View style={styles.heroIllustration}>
+            <View style={styles.heroHeader}>
+              <View style={styles.heroDot} />
+              <Text style={styles.heroHeaderText}>{t('postLogin.loadingDashboard')}</Text>
+            </View>
+            <View style={styles.heroGrid}>
+              <View style={[styles.heroPill, styles.heroPillPrimary]}>
+                <Ionicons name="checkmark-circle-outline" size={16} color={colors.primary} />
+                <Text style={styles.heroPillText}>{t('nav.tasks')}</Text>
+              </View>
+              <View style={[styles.heroPill, styles.heroPillSuccess]}>
+                <Ionicons name="document-text-outline" size={16} color={colors.success} />
+                <Text style={styles.heroPillText}>{t('nav.resources')}</Text>
+              </View>
+              <View style={[styles.heroPill, styles.heroPillWarning]}>
+                <Ionicons name="megaphone-outline" size={16} color={colors.warning} />
+                <Text style={styles.heroPillText}>{t('nav.announcements')}</Text>
+              </View>
+            </View>
           </View>
-          <View style={styles.sideImageWrap}>
-            <Image
-              source={require('../assets/images/partial-react-logo.png')}
-              style={styles.sideImage}
-              contentFit="contain"
-            />
+
+          <View style={styles.sideColumn}>
+            <View style={styles.sideInfoCard}>
+              <Ionicons name="calendar-outline" size={18} color={colors.primary} />
+              <Text style={styles.sideInfoText}>{t('common.today')}</Text>
+            </View>
+            <View style={styles.sideInfoCard}>
+              <Ionicons name="flash-outline" size={18} color={colors.success} />
+              <Text style={styles.sideInfoText}>Focus</Text>
+            </View>
           </View>
         </View>
 
@@ -278,33 +299,86 @@ const createStyles = (
   },
   mediaRow: {
     flexDirection: 'row',
-    alignItems: 'center',
+    alignItems: 'stretch',
     gap: 12,
     marginBottom: 18,
   },
-  heroImageWrap: {
+  heroIllustration: {
     flex: 1,
+    backgroundColor: colors.background,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: colors.border,
+    minHeight: 124,
+    padding: 10,
+    gap: 10,
+  },
+  heroHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  heroDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 99,
+    backgroundColor: colors.primary,
+  },
+  heroHeaderText: {
+    color: colors.textMuted,
+    fontWeight: '600',
+    fontSize: 11,
+  },
+  heroGrid: {
+    gap: 8,
+  },
+  heroPill: {
+    borderRadius: 10,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    borderWidth: 1,
+  },
+  heroPillPrimary: {
     backgroundColor: colors.primarySoft,
-    borderRadius: 16,
-    height: 120,
-    alignItems: 'center',
-    justifyContent: 'center',
+    borderColor: colors.primarySoft,
   },
-  heroImage: {
-    width: 110,
-    height: 110,
-  },
-  sideImageWrap: {
-    width: 92,
-    height: 120,
-    borderRadius: 16,
+  heroPillSuccess: {
     backgroundColor: colors.successSoft,
+    borderColor: colors.successSoft,
+  },
+  heroPillWarning: {
+    backgroundColor: colors.warningSoft,
+    borderColor: colors.warningSoft,
+  },
+  heroPillText: {
+    color: colors.text,
+    fontWeight: '700',
+    fontSize: 12,
+  },
+  sideColumn: {
+    width: 92,
+    justifyContent: 'space-between',
+    gap: 10,
+  },
+  sideInfoCard: {
+    flex: 1,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.background,
     alignItems: 'center',
     justifyContent: 'center',
+    gap: 5,
+    paddingHorizontal: 6,
   },
-  sideImage: {
-    width: 66,
-    height: 66,
+  sideInfoText: {
+    color: colors.text,
+    fontSize: 11,
+    fontWeight: '700',
+    textTransform: 'capitalize',
   },
   progressTrack: {
     height: 8,

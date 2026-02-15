@@ -1,27 +1,193 @@
 import { Redirect } from 'expo-router';
-import { ActivityIndicator, View } from 'react-native';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { ActivityIndicator, Animated, Easing, StyleSheet, Text, View } from 'react-native';
 
+import { BrandLogo } from '@/components/ui/brand-logo';
 import { useAppTheme } from '@/hooks/use-app-theme';
+import { useI18n } from '@/hooks/use-i18n';
 import { useAuth } from '@/providers/auth-provider';
+
+const MIN_LAUNCH_DURATION_MS = 1400;
 
 export default function Index() {
   const { session, loading, shouldShowPostLoginIntro } = useAuth();
-  const { colors } = useAppTheme();
+  const { colors, cardShadow } = useAppTheme();
+  const { t } = useI18n();
+  const [minDelayDone, setMinDelayDone] = useState(false);
+  const fadeAnim = useRef(new Animated.Value(0)).current;
+  const floatAnim = useRef(new Animated.Value(0)).current;
+  const pulseAnim = useRef(new Animated.Value(0)).current;
+  const styles = useMemo(() => createStyles(colors, cardShadow), [cardShadow, colors]);
 
-  if (loading) {
-    return (
-      <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.background }}>
-        <ActivityIndicator color={colors.primary} />
-      </View>
+  useEffect(() => {
+    const timer = setTimeout(() => setMinDelayDone(true), MIN_LAUNCH_DURATION_MS);
+    return () => clearTimeout(timer);
+  }, []);
+
+  useEffect(() => {
+    const curve = Easing.bezier(0.22, 1, 0.36, 1);
+    const pulseCurve = Easing.inOut(Easing.quad);
+
+    const entryAnim = Animated.parallel([
+      Animated.timing(fadeAnim, {
+        toValue: 1,
+        duration: 620,
+        easing: curve,
+        useNativeDriver: true,
+      }),
+      Animated.timing(floatAnim, {
+        toValue: 1,
+        duration: 900,
+        easing: curve,
+        useNativeDriver: true,
+      }),
+    ]);
+
+    const pulseLoop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(pulseAnim, {
+          toValue: 1,
+          duration: 1200,
+          easing: pulseCurve,
+          useNativeDriver: true,
+        }),
+        Animated.timing(pulseAnim, {
+          toValue: 0,
+          duration: 1200,
+          easing: pulseCurve,
+          useNativeDriver: true,
+        }),
+      ])
     );
-  }
 
-  if (session) {
-    if (shouldShowPostLoginIntro) {
-      return <Redirect href="/post-login" />;
+    entryAnim.start();
+    pulseLoop.start();
+
+    return () => {
+      pulseLoop.stop();
+    };
+  }, [fadeAnim, floatAnim, pulseAnim]);
+
+  if (!loading && minDelayDone) {
+    if (session) {
+      if (shouldShowPostLoginIntro) {
+        return <Redirect href="/post-login" />;
+      }
+      return <Redirect href="/(mobile)" />;
     }
-    return <Redirect href="/(mobile)" />;
+    return <Redirect href="/onboarding" />;
   }
 
-  return <Redirect href="/onboarding" />;
+  const cardTranslateY = floatAnim.interpolate({
+    inputRange: [0, 1],
+    outputRange: [16, 0],
+  });
+  const glowScale = pulseAnim.interpolate({
+    inputRange: [0, 1],
+    outputRange: [1, 1.08],
+  });
+  const glowOpacity = pulseAnim.interpolate({
+    inputRange: [0, 1],
+    outputRange: [0.32, 0.6],
+  });
+
+  return (
+    <View style={styles.page}>
+      <Animated.View
+        style={[
+          styles.backgroundGlow,
+          {
+            opacity: glowOpacity,
+            transform: [{ scale: glowScale }],
+          },
+        ]}
+      />
+
+      <Animated.View
+        style={[
+          styles.card,
+          {
+            opacity: fadeAnim,
+            transform: [{ translateY: cardTranslateY }],
+          },
+        ]}>
+        <BrandLogo size={54} align="center" caption={t('launch.brandCaption')} />
+        <Text style={styles.title}>{t('launch.title')}</Text>
+        <Text style={styles.subtitle}>{t('launch.subtitle')}</Text>
+
+        <View style={styles.statusRow}>
+          <ActivityIndicator color={colors.primary} size="small" />
+          <Text style={styles.statusLabel}>{t('launch.status')}</Text>
+        </View>
+      </Animated.View>
+    </View>
+  );
 }
+
+const createStyles = (
+  colors: ReturnType<typeof useAppTheme>['colors'],
+  cardShadow: ReturnType<typeof useAppTheme>['cardShadow']
+) =>
+  StyleSheet.create({
+    page: {
+      flex: 1,
+      alignItems: 'center',
+      justifyContent: 'center',
+      backgroundColor: colors.background,
+      paddingHorizontal: 24,
+      overflow: 'hidden',
+    },
+    backgroundGlow: {
+      position: 'absolute',
+      width: 340,
+      height: 340,
+      borderRadius: 999,
+      backgroundColor: colors.primarySoft,
+      top: '18%',
+    },
+    card: {
+      width: '100%',
+      maxWidth: 360,
+      borderRadius: 24,
+      borderWidth: 1,
+      borderColor: colors.border,
+      backgroundColor: colors.surface,
+      paddingVertical: 30,
+      paddingHorizontal: 20,
+      alignItems: 'center',
+      gap: 8,
+      ...cardShadow,
+    },
+    title: {
+      marginTop: 10,
+      color: colors.text,
+      textAlign: 'center',
+      fontSize: 24,
+      lineHeight: 30,
+      fontWeight: '800',
+    },
+    subtitle: {
+      color: colors.textMuted,
+      textAlign: 'center',
+      lineHeight: 20,
+      marginTop: 2,
+      marginBottom: 8,
+    },
+    statusRow: {
+      marginTop: 6,
+      paddingHorizontal: 12,
+      paddingVertical: 8,
+      borderRadius: 999,
+      borderWidth: 1,
+      borderColor: colors.border,
+      backgroundColor: colors.background,
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 8,
+    },
+    statusLabel: {
+      color: colors.text,
+      fontSize: 13,
+      fontWeight: '600',
+    },
+  });

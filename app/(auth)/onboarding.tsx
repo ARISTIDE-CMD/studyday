@@ -3,6 +3,7 @@ import { router } from 'expo-router';
 import React, { useMemo } from 'react';
 import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 
+import { BrandLogo } from '@/components/ui/brand-logo';
 import { useAppTheme } from '@/hooks/use-app-theme';
 import { useI18n } from '@/hooks/use-i18n';
 
@@ -14,10 +15,7 @@ export default function OnboardingScreen() {
   return (
     <View style={styles.container}>
       <View style={styles.headerBrand}>
-        <View style={styles.brandMark}>
-          <Ionicons name="school-outline" size={18} color="#FFFFFF" />
-        </View>
-        <Text style={styles.brandText}>StudyDay</Text>
+        <BrandLogo size={38} caption={t('launch.brandCaption')} />
       </View>
 
       <View style={styles.illustrationCard}>
@@ -58,23 +56,7 @@ const createStyles = (
     paddingBottom: 28,
   },
   headerBrand: {
-    flexDirection: 'row',
-    alignItems: 'center',
     marginBottom: 30,
-  },
-  brandMark: {
-    width: 34,
-    height: 34,
-    borderRadius: 10,
-    backgroundColor: colors.primary,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginRight: 10,
-  },
-  brandText: {
-    fontSize: 19,
-    fontWeight: '700',
-    color: colors.text,
   },
   illustrationCard: {
     height: 260,

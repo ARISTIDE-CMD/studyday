@@ -1,12 +1,16 @@
 import { Ionicons } from '@expo/vector-icons';
+import * as Clipboard from 'expo-clipboard';
 import * as DocumentPicker from 'expo-document-picker';
+import * as Print from 'expo-print';
 import { router, useLocalSearchParams } from 'expo-router';
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  Alert,
   KeyboardAvoidingView,
   Platform,
   ScrollView,
+  Share,
   StyleSheet,
   Text,
   TextInput,
@@ -34,10 +38,38 @@ import { useAuth } from '@/providers/auth-provider';
 const types = ['note', 'link', 'file'] as const;
 type ResourceType = (typeof types)[number];
 
+function escapeHtml(value: string) {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+function buildPrintableHtml(title: string, text: string) {
+  return `<!doctype html>
+  <html>
+    <head>
+      <meta charset="utf-8" />
+      <meta name="viewport" content="width=device-width, initial-scale=1" />
+      <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif; padding: 28px; color: #111827; }
+        h1 { font-size: 24px; margin-bottom: 14px; }
+        pre { white-space: pre-wrap; word-break: break-word; line-height: 1.55; font-size: 14px; }
+      </style>
+    </head>
+    <body>
+      <h1>${escapeHtml(title || 'Resource')}</h1>
+      <pre>${escapeHtml(text)}</pre>
+    </body>
+  </html>`;
+}
+
 export default function ResourceEditorScreen() {
   const { user } = useAuth();
   const { colors } = useAppTheme();
-  const { t } = useI18n();
+  const { t, locale } = useI18n();
   const { resourceId } = useLocalSearchParams<{ resourceId?: string }>();
 
   const [title, setTitle] = useState('');
@@ -50,8 +82,28 @@ export default function ResourceEditorScreen() {
   const [fileUploading, setFileUploading] = useState(false);
   const [filePicking, setFilePicking] = useState(false);
   const [error, setError] = useState('');
-  const [showToast, setShowToast] = useState(false);
+  const [toastMessage, setToastMessage] = useState('');
+  const [undoStack, setUndoStack] = useState<string[]>([]);
   const styles = useMemo(() => createStyles(colors), [colors]);
+  const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (toastTimer.current) clearTimeout(toastTimer.current);
+    };
+  }, []);
+
+  const pushToast = (message: string, duration = 1100) => {
+    if (toastTimer.current) clearTimeout(toastTimer.current);
+    setToastMessage(message);
+    toastTimer.current = setTimeout(() => setToastMessage(''), duration);
+  };
+
+  const updateContentWithHistory = (nextValue: string) => {
+    if (nextValue === content) return;
+    setUndoStack((prev) => [...prev.slice(-24), content]);
+    setContent(nextValue);
+  };
 
   useEffect(() => {
     const run = async () => {
@@ -69,6 +121,7 @@ export default function ResourceEditorScreen() {
           setType(data.type);
         }
         setContent(data.content ?? '');
+        setUndoStack([]);
         setFileUrl(data.file_url ?? '');
         setTags((data.tags ?? []).join(', '));
       };
@@ -128,9 +181,8 @@ export default function ResourceEditorScreen() {
         });
       }
 
-      setShowToast(true);
+      pushToast(t('resourceEditor.saveSuccess'), 900);
       setTimeout(() => {
-        setShowToast(false);
         router.back();
       }, 900);
     } catch (err) {
@@ -202,6 +254,109 @@ export default function ResourceEditorScreen() {
       setError(getErrorMessage(err, t('resourceEditor.uploadError')));
     } finally {
       setFilePicking(false);
+    }
+  };
+
+  const onUndoContent = () => {
+    setUndoStack((prev) => {
+      if (prev.length === 0) return prev;
+      const last = prev[prev.length - 1];
+      setContent(last);
+      return prev.slice(0, -1);
+    });
+  };
+
+  const onInsertBullet = () => {
+    const next = content.trim().length === 0
+      ? '• '
+      : `${content}${content.endsWith('\n') ? '' : '\n'}• `;
+    updateContentWithHistory(next);
+  };
+
+  const onInsertNumbered = () => {
+    const lines = content
+      .split('\n')
+      .map((line) => line.trim())
+      .filter(Boolean);
+    const nextIndex = Math.max(1, lines.filter((line) => /^\d+\.\s/.test(line)).length + 1);
+    const next = content.trim().length === 0
+      ? `${nextIndex}. `
+      : `${content}${content.endsWith('\n') ? '' : '\n'}${nextIndex}. `;
+    updateContentWithHistory(next);
+  };
+
+  const onInsertQuote = () => {
+    const next = content.trim().length === 0
+      ? '> '
+      : `${content}${content.endsWith('\n') ? '' : '\n'}> `;
+    updateContentWithHistory(next);
+  };
+
+  const onInsertDate = () => {
+    const stamp = new Intl.DateTimeFormat(locale, {
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+    }).format(new Date());
+    const next = content.trim().length === 0
+      ? stamp
+      : `${content}${content.endsWith('\n') ? '' : '\n'}${stamp}`;
+    updateContentWithHistory(next);
+  };
+
+  const onClearContent = () => {
+    if (!content.trim()) return;
+    updateContentWithHistory('');
+    pushToast(t('resourceEditor.clearSuccess'));
+  };
+
+  const onCopyAll = async () => {
+    const text = content.trim();
+    if (!text) {
+      setError(t('resourceEditor.emptyText'));
+      return;
+    }
+
+    if (typeof Clipboard.setStringAsync !== 'function') {
+      setError(t('resourceEditor.copyUnavailable'));
+      return;
+    }
+
+    try {
+      setError('');
+      await Clipboard.setStringAsync(content);
+      pushToast(t('resourceEditor.copySuccess'));
+    } catch {
+      setError(t('resourceEditor.copyUnavailable'));
+    }
+  };
+
+  const onPrintText = async () => {
+    const text = content.trim();
+    if (!text) {
+      setError(t('resourceEditor.emptyText'));
+      return;
+    }
+
+    const printableTitle = title.trim() || t('resourceEditor.createTitle');
+
+    try {
+      setError('');
+      if (typeof Print.printAsync === 'function') {
+        await Print.printAsync({ html: buildPrintableHtml(printableTitle, content) });
+        pushToast(t('resourceEditor.printSuccess'));
+        return;
+      }
+
+      await Share.share({
+        title: printableTitle,
+        message: `${printableTitle}\n\n${content}`,
+      });
+      pushToast(t('resourceEditor.printFallback'));
+    } catch {
+      Alert.alert(t('common.genericError'), t('resourceEditor.printFallback'));
     }
   };
 
@@ -277,15 +432,72 @@ export default function ResourceEditorScreen() {
                 </TouchableOpacity>
               </>
             ) : (
-              <TextInput
-                style={[styles.input, styles.textArea]}
-                value={content}
-                onChangeText={setContent}
-                placeholder={type === 'link' ? t('resourceEditor.linkPlaceholder') : t('resourceEditor.notePlaceholder')}
-                placeholderTextColor="#94A3B8"
-                multiline
-                textAlignVertical="top"
-              />
+              <View style={styles.editorCard}>
+                <View style={styles.editorToolsHead}>
+                  <Text style={styles.editorToolsLabel}>{t('resourceEditor.toolsLabel')}</Text>
+                  <Text style={styles.editorStats}>
+                    {t('resourceEditor.characters', { count: content.length })}
+                    {' · '}
+                    {t('resourceEditor.words', { count: content.trim() ? content.trim().split(/\s+/).length : 0 })}
+                  </Text>
+                </View>
+
+                <View style={styles.editorToolsRow}>
+                  <TouchableOpacity style={styles.editorToolBtn} onPress={() => void onCopyAll()}>
+                    <Ionicons name="copy-outline" size={14} color={colors.text} />
+                    <Text style={styles.editorToolText}>{t('resourceEditor.copyAllButton')}</Text>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity style={styles.editorToolBtn} onPress={() => void onPrintText()}>
+                    <Ionicons name="print-outline" size={14} color={colors.text} />
+                    <Text style={styles.editorToolText}>{t('resourceEditor.printButton')}</Text>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity style={styles.editorToolBtn} onPress={onUndoContent} disabled={undoStack.length === 0}>
+                    <Ionicons name="arrow-undo-outline" size={14} color={undoStack.length ? colors.text : colors.textMuted} />
+                    <Text style={[styles.editorToolText, !undoStack.length && styles.editorToolTextDisabled]}>
+                      {t('resourceEditor.undoButton')}
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+
+                <View style={styles.editorToolsRow}>
+                  <TouchableOpacity style={styles.editorToolBtn} onPress={onInsertBullet}>
+                    <Ionicons name="list-outline" size={14} color={colors.text} />
+                    <Text style={styles.editorToolText}>{t('resourceEditor.bulletButton')}</Text>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity style={styles.editorToolBtn} onPress={onInsertNumbered}>
+                    <Ionicons name="reorder-three-outline" size={14} color={colors.text} />
+                    <Text style={styles.editorToolText}>{t('resourceEditor.numberedButton')}</Text>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity style={styles.editorToolBtn} onPress={onInsertQuote}>
+                    <Ionicons name="chatbox-ellipses-outline" size={14} color={colors.text} />
+                    <Text style={styles.editorToolText}>{t('resourceEditor.quoteButton')}</Text>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity style={styles.editorToolBtn} onPress={onInsertDate}>
+                    <Ionicons name="time-outline" size={14} color={colors.text} />
+                    <Text style={styles.editorToolText}>{t('resourceEditor.dateButton')}</Text>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity style={styles.editorToolBtn} onPress={onClearContent}>
+                    <Ionicons name="trash-outline" size={14} color={colors.danger} />
+                    <Text style={[styles.editorToolText, { color: colors.danger }]}>{t('resourceEditor.clearButton')}</Text>
+                  </TouchableOpacity>
+                </View>
+
+                <TextInput
+                  style={[styles.input, styles.textArea, styles.editorInput]}
+                  value={content}
+                  onChangeText={updateContentWithHistory}
+                  placeholder={type === 'link' ? t('resourceEditor.linkPlaceholder') : t('resourceEditor.notePlaceholder')}
+                  placeholderTextColor="#94A3B8"
+                  multiline
+                  textAlignVertical="top"
+                />
+              </View>
             )}
 
             <Text style={styles.label}>{t('resourceEditor.fieldTags')}</Text>
@@ -309,7 +521,7 @@ export default function ResourceEditorScreen() {
         )}
       </ScrollView>
 
-      {showToast ? <Toast message={t('resourceEditor.saveSuccess')} /> : null}
+      {toastMessage ? <Toast message={toastMessage} /> : null}
     </KeyboardAvoidingView>
   );
 }
@@ -363,8 +575,58 @@ const createStyles = (colors: ReturnType<typeof useAppTheme>['colors']) =>
     justifyContent: 'center',
   },
   textArea: {
-    minHeight: 110,
+    minHeight: 220,
     paddingTop: 12,
+  },
+  editorCard: {
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.surface,
+    padding: 10,
+  },
+  editorToolsHead: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  editorToolsLabel: {
+    color: colors.textMuted,
+    fontWeight: '700',
+    fontSize: 12,
+  },
+  editorStats: {
+    color: colors.textMuted,
+    fontSize: 11,
+  },
+  editorToolsRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginBottom: 8,
+  },
+  editorToolBtn: {
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.background,
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  editorToolText: {
+    color: colors.text,
+    fontWeight: '600',
+    fontSize: 12,
+  },
+  editorToolTextDisabled: {
+    color: colors.textMuted,
+  },
+  editorInput: {
+    marginTop: 2,
   },
   typeRow: {
     flexDirection: 'row',
