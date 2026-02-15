@@ -1,7 +1,7 @@
 import * as FileSystem from 'expo-file-system/legacy';
 import { Platform } from 'react-native';
 
-import type { Announcement, Resource, Task } from '@/types/supabase';
+import type { Announcement, Profile, Resource, Task } from '@/types/supabase';
 
 const STORAGE_KEY = 'studyday-offline-state-v1';
 const FILE_PATH = FileSystem.documentDirectory
@@ -44,13 +44,24 @@ type OutboxResourceDelete = {
   createdAt: string;
 };
 
+type OutboxProfileUpsert = {
+  id: string;
+  entity: 'profile';
+  action: 'upsert';
+  userId: string;
+  record: Profile;
+  createdAt: string;
+};
+
 export type OutboxOperation =
   | OutboxTaskUpsert
   | OutboxTaskDelete
   | OutboxResourceUpsert
-  | OutboxResourceDelete;
+  | OutboxResourceDelete
+  | OutboxProfileUpsert;
 
 type OfflineState = {
+  profilesByUser: Record<string, Profile>;
   tasksByUser: Record<string, Task[]>;
   resourcesByUser: Record<string, Resource[]>;
   announcements: Announcement[];
@@ -59,6 +70,7 @@ type OfflineState = {
 };
 
 const defaultState: OfflineState = {
+  profilesByUser: {},
   tasksByUser: {},
   resourcesByUser: {},
   announcements: [],
@@ -81,6 +93,7 @@ function ensureStateShape(value: unknown): OfflineState {
 
   const partial = value as Partial<OfflineState>;
   return {
+    profilesByUser: partial.profilesByUser && typeof partial.profilesByUser === 'object' ? partial.profilesByUser : {},
     tasksByUser: partial.tasksByUser && typeof partial.tasksByUser === 'object' ? partial.tasksByUser : {},
     resourcesByUser:
       partial.resourcesByUser && typeof partial.resourcesByUser === 'object' ? partial.resourcesByUser : {},
@@ -148,6 +161,10 @@ function sanitizeStateForEntityIds(input: OfflineState): OfflineState {
   });
 
   state.outbox = state.outbox.map((operation) => {
+    if (operation.entity === 'profile') {
+      return operation;
+    }
+
     if (operation.entity === 'task') {
       const map = taskIdMapByUser.get(operation.userId);
       if (operation.action === 'upsert') {
@@ -294,6 +311,23 @@ async function updateState(mutator: (state: OfflineState) => void): Promise<void
 export async function getLocalTasks(userId: string): Promise<Task[]> {
   const state = await loadState();
   return [...(state.tasksByUser[userId] ?? [])];
+}
+
+export async function getLocalProfileById(userId: string): Promise<Profile | null> {
+  const state = await loadState();
+  return state.profilesByUser[userId] ?? null;
+}
+
+export async function setLocalProfile(userId: string, profile: Profile): Promise<void> {
+  await updateState((state) => {
+    state.profilesByUser[userId] = profile;
+  });
+}
+
+export async function removeLocalProfile(userId: string): Promise<void> {
+  await updateState((state) => {
+    delete state.profilesByUser[userId];
+  });
 }
 
 export async function getLocalTaskById(userId: string, taskId: string): Promise<Task | null> {

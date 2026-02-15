@@ -1,15 +1,16 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
 import { router } from 'expo-router';
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Alert, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import Swipeable from 'react-native-gesture-handler/Swipeable';
 
 import { StateBlock } from '@/components/ui/state-block';
 import { useAppTheme } from '@/hooks/use-app-theme';
 import { useI18n } from '@/hooks/use-i18n';
 import { getErrorMessage } from '@/lib/errors';
 import { formatDateLabel } from '@/lib/format';
-import { deleteResource, fetchResources } from '@/lib/student-api';
+import { deleteResource, fetchResources, getCachedResources } from '@/lib/student-api';
 import { useAuth } from '@/providers/auth-provider';
 import type { Resource } from '@/types/supabase';
 
@@ -21,6 +22,14 @@ const typeMeta = {
   file: { icon: 'document-outline' as const },
 };
 
+function SwipeAction({ label, color }: { label: string; color: string }) {
+  return (
+    <View style={[swipeStyles.action, { backgroundColor: color }]}>
+      <Text style={swipeStyles.actionText}>{label}</Text>
+    </View>
+  );
+}
+
 export default function ResourcesScreen() {
   const { user } = useAuth();
   const { colors, cardShadow } = useAppTheme();
@@ -30,20 +39,33 @@ export default function ResourcesScreen() {
   const [filter, setFilter] = useState<ResourceFilter>('tout');
   const [query, setQuery] = useState('');
   const [resources, setResources] = useState<Resource[]>([]);
+  const [selectedResourceIds, setSelectedResourceIds] = useState<string[]>([]);
 
   const styles = useMemo(() => createStyles(colors, cardShadow), [cardShadow, colors]);
 
   const loadResources = useCallback(async () => {
     if (!user?.id) return;
 
+    let hasCachedData = false;
+
     try {
       setLoading(true);
       setError('');
+
+      const cached = await getCachedResources(user.id);
+      hasCachedData = cached.length > 0;
+      if (hasCachedData) {
+        setResources(cached);
+        setLoading(false);
+      }
+
       const data = await fetchResources(user.id);
       setResources(data);
     } catch (err) {
-      const message = getErrorMessage(err, t('resources.loadError'));
-      setError(message);
+      if (!hasCachedData) {
+        const message = getErrorMessage(err, t('resources.loadError'));
+        setError(message);
+      }
     } finally {
       setLoading(false);
     }
@@ -54,6 +76,10 @@ export default function ResourcesScreen() {
       void loadResources();
     }, [loadResources])
   );
+
+  useEffect(() => {
+    setSelectedResourceIds((prev) => prev.filter((resourceId) => resources.some((resource) => resource.id === resourceId)));
+  }, [resources]);
 
   const filtered = useMemo(() => {
     let data = [...resources];
@@ -71,37 +97,43 @@ export default function ResourcesScreen() {
   }, [filter, query, resources]);
 
   const effectiveState = loading ? 'loading' : error ? 'error' : resources.length === 0 ? 'empty' : 'auto';
+  const isSelectionMode = selectedResourceIds.length > 0;
 
-  const removeResource = async (resourceId: string) => {
+  const startSelection = (resourceId: string) => {
+    setSelectedResourceIds((prev) => (prev.includes(resourceId) ? prev : [...prev, resourceId]));
+  };
+
+  const toggleSelection = (resourceId: string) => {
+    setSelectedResourceIds((prev) =>
+      prev.includes(resourceId) ? prev.filter((id) => id !== resourceId) : [...prev, resourceId]
+    );
+  };
+
+  const clearSelection = () => {
+    setSelectedResourceIds([]);
+  };
+
+  const removeResources = async (resourceIds: string[]) => {
     if (!user?.id) return;
+    if (resourceIds.length === 0) return;
 
     const previous = resources;
-    setResources((prev) => prev.filter((resource) => resource.id !== resourceId));
+    setResources((prev) => prev.filter((resource) => !resourceIds.includes(resource.id)));
+    setSelectedResourceIds((prev) => prev.filter((id) => !resourceIds.includes(id)));
 
     try {
-      await deleteResource(resourceId, user.id);
+      await Promise.all(resourceIds.map((resourceId) => deleteResource(resourceId, user.id)));
     } catch {
       setResources(previous);
       Alert.alert(t('common.networkErrorTitle'), t('resources.deleteError'));
     }
   };
 
-  const openMenu = (resource: Resource) => {
-    Alert.alert(t('resources.actionTitle'), resource.title, [
-      {
-        text: t('resources.edit'),
-        onPress: () => router.push(`/resource-editor?resourceId=${resource.id}`),
-      },
-      {
-        text: t('resources.delete'),
-        style: 'destructive',
-        onPress: () => void removeResource(resource.id),
-      },
-      {
-        text: t('common.cancel'),
-        style: 'cancel',
-      },
-    ]);
+  const openSelectedResourceEditor = () => {
+    if (selectedResourceIds.length !== 1) return;
+    const [resourceId] = selectedResourceIds;
+    clearSelection();
+    router.push(`/resource-editor?resourceId=${resourceId}`);
   };
 
   const filterLabels: { key: ResourceFilter; label: string }[] = [
@@ -142,6 +174,35 @@ export default function ResourcesScreen() {
             </TouchableOpacity>
           ))}
         </ScrollView>
+
+        {isSelectionMode ? (
+          <View style={styles.selectionBar}>
+            <Text style={styles.selectionLabel}>
+              {t('common.selectedCount', { count: selectedResourceIds.length })}
+            </Text>
+            <View style={styles.selectionActions}>
+              <TouchableOpacity
+                style={[
+                  styles.selectionBtn,
+                  selectedResourceIds.length !== 1 && styles.selectionBtnDisabled,
+                ]}
+                disabled={selectedResourceIds.length !== 1}
+                onPress={openSelectedResourceEditor}>
+                <Text style={styles.selectionBtnText}>{t('resources.edit')}</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[styles.selectionBtn, styles.selectionBtnDanger]}
+                onPress={() => void removeResources(selectedResourceIds)}>
+                <Text style={styles.selectionBtnText}>{t('resources.delete')}</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity style={[styles.selectionBtn, styles.selectionBtnGhost]} onPress={clearSelection}>
+                <Text style={styles.selectionGhostBtnText}>{t('common.cancel')}</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        ) : null}
 
         {effectiveState === 'loading' ? (
           <View style={styles.stackGap}>
@@ -184,12 +245,30 @@ export default function ResourcesScreen() {
                 const tone = typeMeta[resource.type ?? 'note'];
                 const iconBg = resource.type === 'file' ? colors.warningSoft : resource.type === 'link' ? colors.successSoft : colors.primarySoft;
                 const iconColor = resource.type === 'file' ? colors.warning : resource.type === 'link' ? colors.success : colors.primary;
+                const selected = selectedResourceIds.includes(resource.id);
 
-                return (
+                const card = (
                   <TouchableOpacity
                     key={resource.id}
-                    style={styles.card}
-                    onPress={() => router.push(`/resource-editor?resourceId=${resource.id}`)}>
+                    style={[styles.card, selected && styles.cardSelected]}
+                    activeOpacity={0.85}
+                    delayLongPress={250}
+                    onLongPress={() => startSelection(resource.id)}
+                    onPress={() => {
+                      if (isSelectionMode) {
+                        toggleSelection(resource.id);
+                        return;
+                      }
+                      router.push(`/resource-editor?resourceId=${resource.id}`);
+                    }}>
+                    {isSelectionMode ? (
+                      <TouchableOpacity
+                        style={[styles.selectionDot, selected && styles.selectionDotActive]}
+                        onPress={() => toggleSelection(resource.id)}>
+                        {selected ? <Ionicons name="checkmark" size={12} color="#FFFFFF" /> : null}
+                      </TouchableOpacity>
+                    ) : null}
+
                     <View style={[styles.iconWrap, { backgroundColor: iconBg }]}>
                       <Ionicons name={tone.icon} size={18} color={iconColor} />
                     </View>
@@ -209,11 +288,20 @@ export default function ResourcesScreen() {
                         ))}
                       </View>
                     </View>
-
-                    <TouchableOpacity onPress={() => openMenu(resource)}>
-                      <Ionicons name="ellipsis-vertical" size={16} color={colors.textMuted} />
-                    </TouchableOpacity>
                   </TouchableOpacity>
+                );
+
+                if (isSelectionMode) return card;
+
+                return (
+                  <Swipeable
+                    key={resource.id}
+                    renderLeftActions={() => <SwipeAction label={t('resources.edit')} color={colors.success} />}
+                    onSwipeableLeftOpen={() => router.push(`/resource-editor?resourceId=${resource.id}`)}
+                    renderRightActions={() => <SwipeAction label={t('resources.delete')} color={colors.danger} />}
+                    onSwipeableRightOpen={() => void removeResources([resource.id])}>
+                    {card}
+                  </Swipeable>
                 );
               })
             )}
@@ -223,6 +311,21 @@ export default function ResourcesScreen() {
     </View>
   );
 }
+
+const swipeStyles = StyleSheet.create({
+  action: {
+    width: 92,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 8,
+  },
+  actionText: {
+    color: '#FFFFFF',
+    fontWeight: '700',
+    fontSize: 12,
+  },
+});
 
 const createStyles = (
   colors: ReturnType<typeof useAppTheme>['colors'],
@@ -277,6 +380,50 @@ const createStyles = (
       gap: 8,
       marginBottom: 14,
     },
+    selectionBar: {
+      borderRadius: 12,
+      borderWidth: 1,
+      borderColor: colors.primarySoft,
+      backgroundColor: colors.surface,
+      padding: 10,
+      marginBottom: 12,
+      gap: 10,
+    },
+    selectionLabel: {
+      color: colors.text,
+      fontWeight: '700',
+    },
+    selectionActions: {
+      flexDirection: 'row',
+      gap: 8,
+    },
+    selectionBtn: {
+      borderRadius: 10,
+      backgroundColor: colors.primary,
+      paddingHorizontal: 12,
+      paddingVertical: 8,
+    },
+    selectionBtnDanger: {
+      backgroundColor: colors.danger,
+    },
+    selectionBtnGhost: {
+      backgroundColor: colors.surface,
+      borderWidth: 1,
+      borderColor: colors.border,
+    },
+    selectionBtnDisabled: {
+      opacity: 0.45,
+    },
+    selectionBtnText: {
+      color: '#FFFFFF',
+      fontWeight: '700',
+      fontSize: 12,
+    },
+    selectionGhostBtnText: {
+      color: colors.text,
+      fontWeight: '700',
+      fontSize: 12,
+    },
     filterChip: {
       borderRadius: 999,
       borderWidth: 1,
@@ -315,6 +462,24 @@ const createStyles = (
       alignItems: 'flex-start',
       gap: 10,
       ...cardShadow,
+    },
+    cardSelected: {
+      borderColor: colors.primary,
+      backgroundColor: colors.primarySoft,
+    },
+    selectionDot: {
+      width: 22,
+      height: 22,
+      borderRadius: 11,
+      borderWidth: 2,
+      borderColor: colors.border,
+      alignItems: 'center',
+      justifyContent: 'center',
+      marginTop: 6,
+    },
+    selectionDotActive: {
+      backgroundColor: colors.primary,
+      borderColor: colors.primary,
     },
     iconWrap: {
       width: 36,

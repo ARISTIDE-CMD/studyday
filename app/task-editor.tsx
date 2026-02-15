@@ -4,7 +4,9 @@ import React, { useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   KeyboardAvoidingView,
+  Modal,
   Platform,
+  Pressable,
   ScrollView,
   StyleSheet,
   Switch,
@@ -19,21 +21,72 @@ import { useAppTheme } from '@/hooks/use-app-theme';
 import { useI18n } from '@/hooks/use-i18n';
 import { getErrorMessage } from '@/lib/errors';
 import { createTask, fetchTaskById, getCachedTaskById, updateTask } from '@/lib/student-api';
-import { toIsoDate } from '@/lib/format';
+import { formatDateLabel, toIsoDate } from '@/lib/format';
 import { useAuth } from '@/providers/auth-provider';
 
 const priorities = ['low', 'medium', 'high'] as const;
 type Priority = (typeof priorities)[number];
 
+type CalendarCell = {
+  iso: string | null;
+  day: number | null;
+  key: string;
+};
+
+function parseIsoDate(value: string | null | undefined): Date | null {
+  if (!value || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return null;
+  const [year, month, day] = value.split('-').map((item) => Number(item));
+  const date = new Date(year, month - 1, day);
+  if (Number.isNaN(date.getTime())) return null;
+  return date;
+}
+
+function moveMonth(date: Date, delta: number): Date {
+  return new Date(date.getFullYear(), date.getMonth() + delta, 1);
+}
+
+function buildCalendarCells(monthDate: Date): CalendarCell[] {
+  const year = monthDate.getFullYear();
+  const month = monthDate.getMonth();
+  const firstOfMonth = new Date(year, month, 1);
+  const daysInMonth = new Date(year, month + 1, 0).getDate();
+
+  const leading = (firstOfMonth.getDay() + 6) % 7;
+  const totalCells = Math.ceil((leading + daysInMonth) / 7) * 7;
+  const cells: CalendarCell[] = [];
+
+  for (let index = 0; index < totalCells; index += 1) {
+    const dayNumber = index - leading + 1;
+    if (dayNumber < 1 || dayNumber > daysInMonth) {
+      cells.push({ key: `empty-${index}`, day: null, iso: null });
+      continue;
+    }
+
+    const date = new Date(year, month, dayNumber);
+    cells.push({
+      key: toIsoDate(date),
+      day: dayNumber,
+      iso: toIsoDate(date),
+    });
+  }
+
+  return cells;
+}
+
 export default function TaskEditorScreen() {
   const { user } = useAuth();
   const { colors } = useAppTheme();
-  const { t } = useI18n();
+  const { t, locale } = useI18n();
   const { taskId } = useLocalSearchParams<{ taskId?: string }>();
 
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [dueDate, setDueDate] = useState(toIsoDate());
+  const [calendarVisible, setCalendarVisible] = useState(false);
+  const [calendarMonth, setCalendarMonth] = useState<Date>(() => {
+    const selected = parseIsoDate(toIsoDate());
+    return new Date(selected?.getFullYear() ?? new Date().getFullYear(), selected?.getMonth() ?? new Date().getMonth(), 1);
+  });
   const [priority, setPriority] = useState<Priority>('medium');
   const [isPersistent, setIsPersistent] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -41,6 +94,20 @@ export default function TaskEditorScreen() {
   const [error, setError] = useState('');
   const [showToast, setShowToast] = useState(false);
   const styles = useMemo(() => createStyles(colors), [colors]);
+  const selectedDate = useMemo(() => parseIsoDate(dueDate), [dueDate]);
+  const monthLabel = useMemo(
+    () =>
+      new Intl.DateTimeFormat(locale, {
+        month: 'long',
+        year: 'numeric',
+      }).format(calendarMonth),
+    [calendarMonth, locale]
+  );
+  const weekdayLabels = useMemo(
+    () => (locale.toLowerCase().startsWith('fr') ? ['L', 'M', 'M', 'J', 'V', 'S', 'D'] : ['M', 'T', 'W', 'T', 'F', 'S', 'S']),
+    [locale]
+  );
+  const calendarCells = useMemo(() => buildCalendarCells(calendarMonth), [calendarMonth]);
 
   useEffect(() => {
     const run = async () => {
@@ -56,6 +123,8 @@ export default function TaskEditorScreen() {
         setTitle(data.title);
         setDescription(data.description ?? '');
         setDueDate(data.due_date ?? toIsoDate());
+        const selected = parseIsoDate(data.due_date ?? toIsoDate()) ?? new Date();
+        setCalendarMonth(new Date(selected.getFullYear(), selected.getMonth(), 1));
         setPriority(data.priority);
         setIsPersistent(Boolean(data.is_persistent));
       };
@@ -128,6 +197,12 @@ export default function TaskEditorScreen() {
     }
   };
 
+  const openCalendar = () => {
+    const selected = selectedDate ?? new Date();
+    setCalendarMonth(new Date(selected.getFullYear(), selected.getMonth(), 1));
+    setCalendarVisible(true);
+  };
+
   return (
     <KeyboardAvoidingView style={styles.page} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
@@ -166,13 +241,13 @@ export default function TaskEditorScreen() {
             />
 
             <Text style={styles.label}>{t('taskEditor.fieldDueDate')}</Text>
-            <TextInput
-              style={styles.input}
-              value={dueDate}
-              onChangeText={setDueDate}
-              placeholder="2026-02-14"
-              placeholderTextColor="#94A3B8"
-            />
+            <TouchableOpacity style={styles.datePickerBtn} onPress={openCalendar}>
+              <Ionicons name="calendar-outline" size={18} color={colors.primary} />
+              <Text style={styles.datePickerText}>
+                {formatDateLabel(dueDate, locale, t('common.noDate'))}
+              </Text>
+              <Ionicons name="chevron-forward" size={16} color={colors.textMuted} />
+            </TouchableOpacity>
 
             <Text style={styles.label}>{t('taskEditor.fieldPriority')}</Text>
             <View style={styles.priorityRow}>
@@ -212,6 +287,55 @@ export default function TaskEditorScreen() {
           </>
         )}
       </ScrollView>
+
+      <Modal visible={calendarVisible} transparent animationType="fade" onRequestClose={() => setCalendarVisible(false)}>
+        <Pressable style={styles.calendarOverlay} onPress={() => setCalendarVisible(false)}>
+          <Pressable style={styles.calendarCard} onPress={(event) => event.stopPropagation()}>
+            <View style={styles.calendarHeader}>
+              <TouchableOpacity style={styles.calendarNavBtn} onPress={() => setCalendarMonth((prev) => moveMonth(prev, -1))}>
+                <Ionicons name="chevron-back" size={18} color={colors.text} />
+              </TouchableOpacity>
+              <Text style={styles.calendarMonthLabel}>{monthLabel}</Text>
+              <TouchableOpacity style={styles.calendarNavBtn} onPress={() => setCalendarMonth((prev) => moveMonth(prev, 1))}>
+                <Ionicons name="chevron-forward" size={18} color={colors.text} />
+              </TouchableOpacity>
+            </View>
+
+            <View style={styles.calendarWeekRow}>
+              {weekdayLabels.map((label) => (
+                <Text key={label} style={styles.calendarWeekday}>
+                  {label}
+                </Text>
+              ))}
+            </View>
+
+            <View style={styles.calendarGrid}>
+              {calendarCells.map((cell) => {
+                if (!cell.iso || !cell.day) {
+                  return <View key={cell.key} style={styles.calendarCell} />;
+                }
+
+                const selected = dueDate === cell.iso;
+                return (
+                  <TouchableOpacity
+                    key={cell.key}
+                    style={[styles.calendarCell, styles.calendarDayBtn, selected && styles.calendarDayBtnActive]}
+                    onPress={() => {
+                      setDueDate(cell.iso as string);
+                      setCalendarVisible(false);
+                    }}>
+                    <Text style={[styles.calendarDayText, selected && styles.calendarDayTextActive]}>{cell.day}</Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+
+            <TouchableOpacity style={styles.calendarCloseBtn} onPress={() => setCalendarVisible(false)}>
+              <Text style={styles.calendarCloseText}>{t('common.cancel')}</Text>
+            </TouchableOpacity>
+          </Pressable>
+        </Pressable>
+      </Modal>
 
       {showToast ? <Toast message={t('taskEditor.saveSuccess')} /> : null}
     </KeyboardAvoidingView>
@@ -269,6 +393,22 @@ const createStyles = (colors: ReturnType<typeof useAppTheme>['colors']) =>
   textArea: {
     minHeight: 110,
     paddingTop: 12,
+  },
+  datePickerBtn: {
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.surface,
+    minHeight: 50,
+    paddingHorizontal: 14,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  datePickerText: {
+    flex: 1,
+    color: colors.text,
+    fontWeight: '600',
   },
   priorityRow: {
     flexDirection: 'row',
@@ -330,6 +470,93 @@ const createStyles = (colors: ReturnType<typeof useAppTheme>['colors']) =>
   },
   saveBtnDisabled: {
     opacity: 0.45,
+  },
+  calendarOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(2,6,23,0.45)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 16,
+  },
+  calendarCard: {
+    width: '100%',
+    maxWidth: 420,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.surface,
+    padding: 14,
+  },
+  calendarHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 10,
+  },
+  calendarNavBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: colors.border,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.background,
+  },
+  calendarMonthLabel: {
+    color: colors.text,
+    fontWeight: '700',
+    textTransform: 'capitalize',
+  },
+  calendarWeekRow: {
+    flexDirection: 'row',
+    marginBottom: 6,
+  },
+  calendarWeekday: {
+    flex: 1,
+    textAlign: 'center',
+    color: colors.textMuted,
+    fontWeight: '600',
+    fontSize: 12,
+  },
+  calendarGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    rowGap: 6,
+  },
+  calendarCell: {
+    width: '14.2857%',
+    height: 38,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  calendarDayBtn: {
+    borderRadius: 9,
+  },
+  calendarDayBtnActive: {
+    backgroundColor: colors.primary,
+  },
+  calendarDayText: {
+    color: colors.text,
+    fontWeight: '600',
+  },
+  calendarDayTextActive: {
+    color: '#FFFFFF',
+    fontWeight: '700',
+  },
+  calendarCloseBtn: {
+    marginTop: 12,
+    alignSelf: 'flex-end',
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: colors.border,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    backgroundColor: colors.background,
+  },
+  calendarCloseText: {
+    color: colors.text,
+    fontWeight: '700',
   },
   saveBtnText: {
     color: '#FFFFFF',

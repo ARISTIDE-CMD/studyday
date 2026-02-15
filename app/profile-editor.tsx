@@ -19,7 +19,6 @@ import { Toast } from '@/components/ui/toast';
 import { useAppTheme } from '@/hooks/use-app-theme';
 import { useI18n } from '@/hooks/use-i18n';
 import { getErrorMessage } from '@/lib/errors';
-import { supabase } from '@/lib/supabase';
 import {
   isSupabaseBucketPublicUrl,
   uploadLocalAssetToBucket,
@@ -36,7 +35,7 @@ function extractFirstName(email: string | null | undefined, fallback: string): s
 }
 
 export default function ProfileEditorScreen() {
-  const { user, profile, refreshProfile } = useAuth();
+  const { user, profile, saveProfileLocalFirst } = useAuth();
   const { colors, cardShadow } = useAppTheme();
   const { t } = useI18n();
 
@@ -70,20 +69,7 @@ export default function ProfileEditorScreen() {
 
   const persistAvatar = async (uploadedUrl: string) => {
     if (!user?.id) return;
-
-    const { error: authError } = await supabase.auth.updateUser({
-      data: {
-        avatar_url: uploadedUrl,
-      },
-    });
-    if (authError) throw authError;
-
-    const { error: profileError } = await supabase
-      .from('profiles')
-      .upsert({ id: user.id, avatar_url: uploadedUrl }, { onConflict: 'id' });
-    if (profileError) throw profileError;
-
-    await refreshProfile();
+    await saveProfileLocalFirst({ avatar_url: uploadedUrl });
   };
 
   const onUploadAvatar = async () => {
@@ -173,20 +159,10 @@ export default function ProfileEditorScreen() {
     setError('');
 
     try {
-      const { error: authError } = await supabase.auth.updateUser({
-        data: {
-          full_name: nextName,
-          avatar_url: nextAvatarUrl || null,
-        },
+      await saveProfileLocalFirst({
+        full_name: nextName,
+        avatar_url: nextAvatarUrl || null,
       });
-      if (authError) throw authError;
-
-      const { error: profileError } = await supabase
-        .from('profiles')
-        .upsert({ id: user.id, full_name: nextName, avatar_url: nextAvatarUrl || null }, { onConflict: 'id' });
-      if (profileError) throw profileError;
-
-      await refreshProfile();
       setShowToast(true);
 
       setTimeout(() => {

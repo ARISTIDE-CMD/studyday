@@ -1,7 +1,15 @@
 import type { Session, User } from '@supabase/supabase-js';
-import React, { createContext, useContext, useEffect, useMemo, useState } from 'react';
+import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 
+import {
+  createLocalId,
+  enqueueOutboxOperation,
+  getLocalProfileById,
+  removeLocalProfile,
+  setLocalProfile,
+} from '@/lib/offline-store';
 import { supabase } from '@/lib/supabase';
+import { syncPendingOperations } from '@/lib/sync-engine';
 import type { Profile } from '@/types/supabase';
 
 type AuthContextValue = {
@@ -11,6 +19,7 @@ type AuthContextValue = {
   shouldShowPostLoginIntro: boolean;
   loading: boolean;
   refreshProfile: () => Promise<void>;
+  saveProfileLocalFirst: (patch: { full_name?: string | null; avatar_url?: string | null }) => Promise<void>;
   queuePostLoginIntro: () => void;
   consumePostLoginIntro: () => void;
   signOut: () => Promise<void>;
@@ -45,21 +54,94 @@ async function upsertProfile(user: User): Promise<Profile | null> {
   return data ?? null;
 }
 
+function fallbackNameFromUser(user: User): string {
+  const metadataName =
+    typeof user.user_metadata?.full_name === 'string' ? user.user_metadata.full_name.trim() : '';
+  if (metadataName) return metadataName;
+  return user.email?.split('@')[0] ?? 'Etudiant';
+}
+
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [session, setSession] = useState<Session | null>(null);
   const [profile, setProfile] = useState<Profile | null>(null);
   const [shouldShowPostLoginIntro, setShouldShowPostLoginIntro] = useState(false);
   const [loading, setLoading] = useState(true);
 
-  const refreshProfile = async () => {
+  const refreshProfile = useCallback(async () => {
     if (!session?.user) {
       setProfile(null);
       return;
     }
 
-    const data = await upsertProfile(session.user);
-    setProfile(data);
-  };
+    const cached = await getLocalProfileById(session.user.id);
+    if (cached) {
+      setProfile(cached);
+    }
+
+    try {
+      const data = await upsertProfile(session.user);
+      if (data) {
+        await setLocalProfile(session.user.id, data);
+      }
+      setProfile(data ?? cached ?? null);
+    } catch {
+      if (!cached) {
+        setProfile(null);
+      }
+    }
+  }, [session?.user]);
+
+  const saveProfileLocalFirst = useCallback(async (patch: { full_name?: string | null; avatar_url?: string | null }) => {
+    if (!session?.user) {
+      return;
+    }
+
+    const user = session.user;
+    const fallbackName = fallbackNameFromUser(user);
+    const nextProfile: Profile = {
+      id: user.id,
+      full_name:
+        patch.full_name !== undefined
+          ? patch.full_name
+          : (profile?.full_name ?? fallbackName),
+      avatar_url:
+        patch.avatar_url !== undefined
+          ? patch.avatar_url
+          : (profile?.avatar_url ?? null),
+      role: profile?.role ?? 'student',
+      created_at: profile?.created_at ?? new Date().toISOString(),
+    };
+
+    setProfile(nextProfile);
+    await setLocalProfile(user.id, nextProfile);
+    await enqueueOutboxOperation({
+      id: createLocalId('op'),
+      entity: 'profile',
+      action: 'upsert',
+      userId: user.id,
+      record: nextProfile,
+      createdAt: new Date().toISOString(),
+    });
+
+    void (async () => {
+      try {
+        await supabase.auth.updateUser({
+          data: {
+            full_name: nextProfile.full_name,
+            avatar_url: nextProfile.avatar_url,
+          },
+        });
+      } catch {
+        // Keep local-first behavior.
+      }
+
+      try {
+        await syncPendingOperations(user.id);
+      } catch {
+        // Keep local-first behavior and retry later.
+      }
+    })();
+  }, [profile, session?.user]);
 
   useEffect(() => {
     let active = true;
@@ -77,11 +159,19 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setSession(data.session);
 
       if (data.session?.user) {
+        const cachedProfile = await getLocalProfileById(data.session.user.id);
+        if (cachedProfile && active) {
+          setProfile(cachedProfile);
+        }
+
         try {
           const dataProfile = await upsertProfile(data.session.user);
-          if (active) setProfile(dataProfile);
+          if (dataProfile) {
+            await setLocalProfile(data.session.user.id, dataProfile);
+          }
+          if (active) setProfile(dataProfile ?? cachedProfile ?? null);
         } catch {
-          if (active) setProfile(null);
+          if (active && !cachedProfile) setProfile(null);
         }
       } else {
         setProfile(null);
@@ -105,11 +195,19 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
 
       void (async () => {
+        const cachedProfile = await getLocalProfileById(nextSession.user.id);
+        if (active && cachedProfile) {
+          setProfile(cachedProfile);
+        }
+
         try {
           const dataProfile = await upsertProfile(nextSession.user);
-          if (active) setProfile(dataProfile);
+          if (dataProfile) {
+            await setLocalProfile(nextSession.user.id, dataProfile);
+          }
+          if (active) setProfile(dataProfile ?? cachedProfile ?? null);
         } catch {
-          if (active) setProfile(null);
+          if (active && !cachedProfile) setProfile(null);
         } finally {
           if (active) setLoading(false);
         }
@@ -122,20 +220,23 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     };
   }, []);
 
-  const signOut = async () => {
+  const signOut = useCallback(async () => {
+    if (session?.user?.id) {
+      await removeLocalProfile(session.user.id);
+    }
     await supabase.auth.signOut();
     setSession(null);
     setProfile(null);
     setShouldShowPostLoginIntro(false);
-  };
+  }, [session?.user?.id]);
 
-  const queuePostLoginIntro = () => {
+  const queuePostLoginIntro = useCallback(() => {
     setShouldShowPostLoginIntro(true);
-  };
+  }, []);
 
-  const consumePostLoginIntro = () => {
+  const consumePostLoginIntro = useCallback(() => {
     setShouldShowPostLoginIntro(false);
-  };
+  }, []);
 
   const value = useMemo<AuthContextValue>(
     () => ({
@@ -145,11 +246,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       shouldShowPostLoginIntro,
       loading,
       refreshProfile,
+      saveProfileLocalFirst,
       queuePostLoginIntro,
       consumePostLoginIntro,
       signOut,
     }),
-    [loading, profile, session, shouldShowPostLoginIntro]
+    [loading, profile, refreshProfile, saveProfileLocalFirst, session, shouldShowPostLoginIntro]
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

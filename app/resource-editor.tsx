@@ -26,6 +26,7 @@ import {
 import {
   createResource,
   fetchResourceById,
+  getCachedResourceById,
   updateResource,
 } from '@/lib/student-api';
 import { useAuth } from '@/providers/auth-provider';
@@ -56,11 +57,13 @@ export default function ResourceEditorScreen() {
     const run = async () => {
       if (!resourceId || !user?.id) return;
 
-      try {
-        setScreenLoading(true);
-        const data = await fetchResourceById(user.id, resourceId);
-        if (!data) return;
-
+      const applyResource = (data: {
+        title: string;
+        type: ResourceType | null;
+        content: string | null;
+        file_url: string | null;
+        tags: string[] | null;
+      }) => {
         setTitle(data.title);
         if (data.type === 'note' || data.type === 'link' || data.type === 'file') {
           setType(data.type);
@@ -68,6 +71,20 @@ export default function ResourceEditorScreen() {
         setContent(data.content ?? '');
         setFileUrl(data.file_url ?? '');
         setTags((data.tags ?? []).join(', '));
+      };
+
+      try {
+        setScreenLoading(true);
+        const cached = await getCachedResourceById(user.id, resourceId);
+        if (cached) {
+          applyResource(cached);
+          setScreenLoading(false);
+        }
+
+        const data = await fetchResourceById(user.id, resourceId);
+        if (!data) return;
+
+        applyResource(data);
       } finally {
         setScreenLoading(false);
       }

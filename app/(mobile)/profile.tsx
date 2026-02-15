@@ -3,7 +3,7 @@ import { useFocusEffect } from '@react-navigation/native';
 import { Image } from 'expo-image';
 import { router } from 'expo-router';
 import React, { useCallback, useMemo, useState } from 'react';
-import { ActivityIndicator, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 
 import { useAppTheme } from '@/hooks/use-app-theme';
 import { useI18n } from '@/hooks/use-i18n';
@@ -91,7 +91,7 @@ export default function ProfileScreen() {
 
   return (
     <View style={themedStyles.page}>
-      <View style={themedStyles.content}>
+      <ScrollView contentContainerStyle={themedStyles.content} showsVerticalScrollIndicator={false}>
         <Text style={themedStyles.title}>{t('profile.title')}</Text>
 
         <View style={themedStyles.profileCard}>
@@ -171,7 +171,15 @@ export default function ProfileScreen() {
         <TouchableOpacity style={themedStyles.dangerAction} onPress={() => void onSignOut()}>
           <Text style={themedStyles.dangerActionText}>{t('profile.signOut')}</Text>
         </TouchableOpacity>
-      </View>
+
+        <View style={themedStyles.privacyCard}>
+          <View style={themedStyles.privacyHeader}>
+            <Ionicons name="shield-checkmark-outline" size={16} color={colors.success} />
+            <Text style={themedStyles.privacyTitle}>{t('profile.privacyTitle')}</Text>
+          </View>
+          <Text style={themedStyles.privacyText}>{t('profile.privacyDescription')}</Text>
+        </View>
+      </ScrollView>
     </View>
   );
 }
@@ -201,6 +209,7 @@ const createStyles = (
     content: {
       paddingTop: 56,
       paddingHorizontal: 16,
+      paddingBottom: 120,
     },
     title: {
       fontSize: 28,
@@ -340,5 +349,29 @@ const createStyles = (
     dangerActionText: {
       color: colors.danger,
       fontWeight: '700',
+    },
+    privacyCard: {
+      borderRadius: 12,
+      borderWidth: 1,
+      borderColor: colors.border,
+      backgroundColor: colors.surface,
+      padding: 12,
+      marginTop: 10,
+    },
+    privacyHeader: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 6,
+      marginBottom: 6,
+    },
+    privacyTitle: {
+      color: colors.text,
+      fontWeight: '700',
+      fontSize: 13,
+    },
+    privacyText: {
+      color: colors.textMuted,
+      fontSize: 12,
+      lineHeight: 18,
     },
   });

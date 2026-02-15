@@ -1,7 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
 import { router } from 'expo-router';
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Alert, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import Swipeable from 'react-native-gesture-handler/Swipeable';
 
@@ -46,6 +46,7 @@ export default function TasksScreen() {
   const [filter, setFilter] = useState<Filter>('toutes');
   const [windowFilter, setWindowFilter] = useState<WindowFilter>('toutes-dates');
   const [tasks, setTasks] = useState<Task[]>([]);
+  const [selectedTaskIds, setSelectedTaskIds] = useState<string[]>([]);
 
   const themedStyles = useMemo(() => createStyles(colors, cardShadow), [cardShadow, colors]);
   const priorityStyle = useMemo(
@@ -91,6 +92,10 @@ export default function TasksScreen() {
     }, [loadTasks])
   );
 
+  useEffect(() => {
+    setSelectedTaskIds((prev) => prev.filter((taskId) => tasks.some((task) => task.id === taskId)));
+  }, [tasks]);
+
   const filteredTasks = useMemo(() => {
     let data = [...tasks];
 
@@ -109,6 +114,19 @@ export default function TasksScreen() {
   }, [filter, tasks, windowFilter]);
 
   const effectiveState = loading ? 'loading' : error ? 'error' : tasks.length === 0 ? 'empty' : 'auto';
+  const isSelectionMode = selectedTaskIds.length > 0;
+
+  const startSelection = (taskId: string) => {
+    setSelectedTaskIds((prev) => (prev.includes(taskId) ? prev : [...prev, taskId]));
+  };
+
+  const toggleSelection = (taskId: string) => {
+    setSelectedTaskIds((prev) => (prev.includes(taskId) ? prev.filter((id) => id !== taskId) : [...prev, taskId]));
+  };
+
+  const clearSelection = () => {
+    setSelectedTaskIds([]);
+  };
 
   const toggleTask = async (task: Task) => {
     if (!user?.id) return;
@@ -127,18 +145,27 @@ export default function TasksScreen() {
     }
   };
 
-  const removeTask = async (taskId: string) => {
+  const removeTasks = async (taskIds: string[]) => {
     if (!user?.id) return;
+    if (taskIds.length === 0) return;
 
     const previous = tasks;
-    setTasks((prev) => prev.filter((task) => task.id !== taskId));
+    setTasks((prev) => prev.filter((task) => !taskIds.includes(task.id)));
+    setSelectedTaskIds((prev) => prev.filter((id) => !taskIds.includes(id)));
 
     try {
-      await deleteTask(taskId, user.id);
+      await Promise.all(taskIds.map((taskId) => deleteTask(taskId, user.id)));
     } catch {
       setTasks(previous);
       Alert.alert(t('common.networkErrorTitle'), t('tasks.deleteError'));
     }
+  };
+
+  const openSelectedTaskEditor = () => {
+    if (selectedTaskIds.length !== 1) return;
+    const [taskId] = selectedTaskIds;
+    clearSelection();
+    router.push(`/task-editor?taskId=${taskId}`);
   };
 
   const filterLabels: { key: Filter; label: string }[] = [
@@ -193,6 +220,37 @@ export default function TasksScreen() {
           <Text style={themedStyles.noticeText}>{t('tasks.archiveNotice')}</Text>
         </View>
 
+        {isSelectionMode ? (
+          <View style={themedStyles.selectionBar}>
+            <Text style={themedStyles.selectionLabel}>
+              {t('common.selectedCount', { count: selectedTaskIds.length })}
+            </Text>
+            <View style={themedStyles.selectionActions}>
+              <TouchableOpacity
+                style={[
+                  themedStyles.selectionBtn,
+                  selectedTaskIds.length !== 1 && themedStyles.selectionBtnDisabled,
+                ]}
+                disabled={selectedTaskIds.length !== 1}
+                onPress={openSelectedTaskEditor}>
+                <Text style={themedStyles.selectionBtnText}>{t('tasks.swipeEdit')}</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[themedStyles.selectionBtn, themedStyles.selectionBtnDanger]}
+                onPress={() => void removeTasks(selectedTaskIds)}>
+                <Text style={themedStyles.selectionBtnText}>{t('tasks.swipeDelete')}</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[themedStyles.selectionBtn, themedStyles.selectionBtnGhost]}
+                onPress={clearSelection}>
+                <Text style={themedStyles.selectionGhostBtnText}>{t('common.cancel')}</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        ) : null}
+
         {effectiveState === 'loading' ? (
           <View style={themedStyles.stackGap}>
             {[1, 2, 3].map((placeholder) => (
@@ -233,6 +291,46 @@ export default function TasksScreen() {
               filteredTasks.map((task) => {
                 const tone = priorityStyle[task.priority];
                 const done = task.status === 'done';
+                const selected = selectedTaskIds.includes(task.id);
+                const isMarked = isSelectionMode ? selected : done;
+
+                const card = (
+                  <TouchableOpacity
+                    key={task.id}
+                    style={[themedStyles.card, selected && themedStyles.cardSelected]}
+                    activeOpacity={0.85}
+                    delayLongPress={250}
+                    onLongPress={() => startSelection(task.id)}
+                    onPress={() => {
+                      if (isSelectionMode) toggleSelection(task.id);
+                    }}>
+                    <TouchableOpacity
+                      style={[
+                        themedStyles.checkbox,
+                        isSelectionMode ? selected && themedStyles.checkboxSelected : done && themedStyles.checkboxDone,
+                      ]}
+                      onPress={() => {
+                        if (isSelectionMode) {
+                          toggleSelection(task.id);
+                          return;
+                        }
+                        void toggleTask(task);
+                      }}>
+                      {isMarked ? <Ionicons name="checkmark" size={14} color="#FFFFFF" /> : null}
+                    </TouchableOpacity>
+
+                    <View style={themedStyles.cardMain}>
+                      <Text style={[themedStyles.taskTitle, done && themedStyles.taskTitleDone]}>{task.title}</Text>
+                      <Text style={themedStyles.meta}>{formatDateLabel(task.due_date, locale, t('common.noDate'))}</Text>
+                    </View>
+
+                    <View style={[themedStyles.priorityBadge, { backgroundColor: tone.bg }]}>
+                      <Text style={[themedStyles.priorityText, { color: tone.color }]}>{tone.label}</Text>
+                    </View>
+                  </TouchableOpacity>
+                );
+
+                if (isSelectionMode) return card;
 
                 return (
                   <Swipeable
@@ -240,23 +338,8 @@ export default function TasksScreen() {
                     renderLeftActions={() => <SwipeAction label={t('tasks.swipeEdit')} color={colors.success} />}
                     onSwipeableLeftOpen={() => router.push(`/task-editor?taskId=${task.id}`)}
                     renderRightActions={() => <SwipeAction label={t('tasks.swipeDelete')} color={colors.danger} />}
-                    onSwipeableRightOpen={() => void removeTask(task.id)}>
-                    <View style={themedStyles.card}>
-                      <TouchableOpacity
-                        style={[themedStyles.checkbox, done && themedStyles.checkboxDone]}
-                        onPress={() => void toggleTask(task)}>
-                        {done ? <Ionicons name="checkmark" size={14} color="#FFFFFF" /> : null}
-                      </TouchableOpacity>
-
-                      <View style={themedStyles.cardMain}>
-                        <Text style={[themedStyles.taskTitle, done && themedStyles.taskTitleDone]}>{task.title}</Text>
-                        <Text style={themedStyles.meta}>{formatDateLabel(task.due_date, locale, t('common.noDate'))}</Text>
-                      </View>
-
-                      <View style={[themedStyles.priorityBadge, { backgroundColor: tone.bg }]}>
-                        <Text style={[themedStyles.priorityText, { color: tone.color }]}>{tone.label}</Text>
-                      </View>
-                    </View>
+                    onSwipeableRightOpen={() => void removeTasks([task.id])}>
+                    {card}
                   </Swipeable>
                 );
               })
@@ -387,6 +470,50 @@ const createStyles = (
       fontSize: 12,
       lineHeight: 17,
     },
+    selectionBar: {
+      borderRadius: 12,
+      borderWidth: 1,
+      borderColor: colors.primarySoft,
+      backgroundColor: colors.surface,
+      padding: 10,
+      marginBottom: 12,
+      gap: 10,
+    },
+    selectionLabel: {
+      color: colors.text,
+      fontWeight: '700',
+    },
+    selectionActions: {
+      flexDirection: 'row',
+      gap: 8,
+    },
+    selectionBtn: {
+      borderRadius: 10,
+      backgroundColor: colors.primary,
+      paddingHorizontal: 12,
+      paddingVertical: 8,
+    },
+    selectionBtnDanger: {
+      backgroundColor: colors.danger,
+    },
+    selectionBtnGhost: {
+      backgroundColor: colors.surface,
+      borderWidth: 1,
+      borderColor: colors.border,
+    },
+    selectionBtnDisabled: {
+      opacity: 0.45,
+    },
+    selectionBtnText: {
+      color: '#FFFFFF',
+      fontWeight: '700',
+      fontSize: 12,
+    },
+    selectionGhostBtnText: {
+      color: colors.text,
+      fontWeight: '700',
+      fontSize: 12,
+    },
     stackGap: {
       gap: 10,
     },
@@ -405,6 +532,10 @@ const createStyles = (
       padding: 12,
       ...cardShadow,
     },
+    cardSelected: {
+      borderColor: colors.primary,
+      backgroundColor: colors.primarySoft,
+    },
     checkbox: {
       width: 24,
       height: 24,
@@ -418,6 +549,10 @@ const createStyles = (
     checkboxDone: {
       backgroundColor: colors.success,
       borderColor: colors.success,
+    },
+    checkboxSelected: {
+      backgroundColor: colors.primary,
+      borderColor: colors.primary,
     },
     cardMain: {
       flex: 1,

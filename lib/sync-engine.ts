@@ -44,6 +44,12 @@ async function syncOperation(operation: OutboxOperation): Promise<void> {
     if (profileError) throw profileError;
   }
 
+  if (operation.entity === 'profile') {
+    const { error } = await supabase.from('profiles').upsert(operation.record, { onConflict: 'id' });
+    if (error) throw error;
+    return;
+  }
+
   if (operation.entity === 'task') {
     if (operation.action === 'upsert') {
       const { error } = await supabase.from('tasks').upsert(operation.record, { onConflict: 'id' });

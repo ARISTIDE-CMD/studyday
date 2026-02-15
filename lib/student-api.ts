@@ -82,6 +82,14 @@ export async function getCachedTaskStats(userId: string): Promise<{ total: numbe
   };
 }
 
+export async function getCachedResources(userId: string): Promise<Resource[]> {
+  return sortResources(await getLocalResources(userId));
+}
+
+export async function getCachedResourceById(userId: string, resourceId: string): Promise<Resource | null> {
+  return getLocalResourceById(userId, resourceId);
+}
+
 function shouldPurgeArchivedTask(task: Task, now = Date.now()) {
   if (task.status !== 'done') return false;
   if (task.is_persistent) return false;
@@ -548,6 +556,7 @@ export async function fetchAnnouncementById(id: string) {
 
 export async function fetchDashboardSummary(userId: string) {
   const tasks = await fetchTasks(userId);
+  const resources = await fetchResources(userId);
   const announcements = await fetchAnnouncements();
 
   const todoTasks = tasks.filter((task) => task.status !== 'done');
@@ -555,6 +564,7 @@ export async function fetchDashboardSummary(userId: string) {
 
   return {
     tasks,
+    latestResources: resources.slice(0, 3),
     todoCount: todoTasks.length,
     overdueCount: overdue.length,
     latestAnnouncement: announcements[0] ?? null,
@@ -563,6 +573,7 @@ export async function fetchDashboardSummary(userId: string) {
 
 export async function getCachedDashboardSummary(userId: string) {
   const tasks = await getCachedTasks(userId);
+  const resources = await getCachedResources(userId);
   const announcements = await getCachedAnnouncements();
 
   const todoTasks = tasks.filter((task) => task.status !== 'done');
@@ -570,6 +581,7 @@ export async function getCachedDashboardSummary(userId: string) {
 
   return {
     tasks,
+    latestResources: resources.slice(0, 3),
     todoCount: todoTasks.length,
     overdueCount: overdue.length,
     latestAnnouncement: announcements[0] ?? null,

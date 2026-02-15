@@ -3,7 +3,7 @@ import { useFocusEffect } from '@react-navigation/native';
 import { Image } from 'expo-image';
 import { router } from 'expo-router';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 
 import { StateBlock } from '@/components/ui/state-block';
 import { useAppTheme } from '@/hooks/use-app-theme';
@@ -12,7 +12,7 @@ import { getErrorMessage } from '@/lib/errors';
 import { fetchDashboardSummary, getCachedDashboardSummary } from '@/lib/student-api';
 import { formatDateLabel, humanNow } from '@/lib/format';
 import { useAuth } from '@/providers/auth-provider';
-import type { Announcement, Task } from '@/types/supabase';
+import type { Announcement, Resource, Task } from '@/types/supabase';
 
 export default function HomeDashboardScreen() {
   const { user, profile } = useAuth();
@@ -23,8 +23,10 @@ export default function HomeDashboardScreen() {
   const [todoCount, setTodoCount] = useState(0);
   const [overdueCount, setOverdueCount] = useState(0);
   const [nextTasks, setNextTasks] = useState<Task[]>([]);
+  const [latestResources, setLatestResources] = useState<Resource[]>([]);
   const [latestAnnouncement, setLatestAnnouncement] = useState<Announcement | null>(null);
   const [avatarImageError, setAvatarImageError] = useState(false);
+  const [fabMenuOpen, setFabMenuOpen] = useState(false);
 
   const displayName = useMemo(() => {
     const fromProfile = profile?.full_name?.trim();
@@ -71,6 +73,14 @@ export default function HomeDashboardScreen() {
     }),
     [colors.danger, colors.dangerSoft, colors.success, colors.successSoft, colors.warning, colors.warningSoft, t]
   );
+  const resourceIconByType = useMemo(
+    () => ({
+      note: { icon: 'document-text-outline' as const, bg: colors.primarySoft, color: colors.primary },
+      link: { icon: 'link-outline' as const, bg: colors.successSoft, color: colors.success },
+      file: { icon: 'document-outline' as const, bg: colors.warningSoft, color: colors.warning },
+    }),
+    [colors.primary, colors.primarySoft, colors.success, colors.successSoft, colors.warning, colors.warningSoft]
+  );
 
   useEffect(() => {
     setAvatarImageError(false);
@@ -80,6 +90,7 @@ export default function HomeDashboardScreen() {
     setTodoCount(summary.todoCount);
     setOverdueCount(summary.overdueCount);
     setNextTasks(summary.tasks.filter((task) => task.status !== 'done').slice(0, 3));
+    setLatestResources(summary.latestResources);
     setLatestAnnouncement(summary.latestAnnouncement);
   }, []);
 
@@ -93,7 +104,7 @@ export default function HomeDashboardScreen() {
       setError('');
 
       const cached = await getCachedDashboardSummary(user.id);
-      hasCachedData = cached.tasks.length > 0 || cached.latestAnnouncement !== null;
+      hasCachedData = cached.tasks.length > 0 || cached.latestResources.length > 0 || cached.latestAnnouncement !== null;
       if (hasCachedData) {
         applySummary(cached);
         setLoading(false);
@@ -119,7 +130,7 @@ export default function HomeDashboardScreen() {
 
   return (
     <View style={styles.page}>
-      <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+      <View style={styles.stickyHeader}>
         <View style={styles.headerRow}>
           <View>
             <Text style={styles.greeting}>{t('home.greeting', { name: displayName })}</Text>
@@ -150,6 +161,9 @@ export default function HomeDashboardScreen() {
             </TouchableOpacity>
           </View>
         </View>
+      </View>
+
+      <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
 
         <View style={styles.dayCard}>
           <Text style={styles.dayLabel}>{t('home.daySummary')}</Text>
@@ -187,9 +201,14 @@ export default function HomeDashboardScreen() {
           <>
             <View style={styles.sectionHeader}>
               <Text style={styles.sectionTitle}>{t('home.nextTasks')}</Text>
-              <TouchableOpacity onPress={() => router.push('/tasks')}>
-                <Text style={styles.sectionLink}>{t('home.seeAll')}</Text>
-              </TouchableOpacity>
+              <View style={styles.sectionLinksRow}>
+                <TouchableOpacity onPress={() => router.push('/tasks')}>
+                  <Text style={styles.sectionLink}>{t('home.seeAll')}</Text>
+                </TouchableOpacity>
+                <TouchableOpacity onPress={() => router.push('/resources')}>
+                  <Text style={styles.sectionLink}>{t('home.seeResources')}</Text>
+                </TouchableOpacity>
+              </View>
             </View>
 
             {nextTasks.length === 0 ? (
@@ -204,15 +223,48 @@ export default function HomeDashboardScreen() {
               nextTasks.map((task) => {
                 const tone = priorityStyle[task.priority];
                 return (
-                  <View key={task.id} style={styles.taskCard}>
+                  <TouchableOpacity key={task.id} style={styles.taskCard} onPress={() => router.push(`/task/${task.id}`)}>
                     <View style={styles.taskMain}>
                       <Text style={styles.taskTitle}>{task.title}</Text>
                       <Text style={styles.taskMeta}>{formatDateLabel(task.due_date, locale, t('common.noDate'))}</Text>
                     </View>
-                    <View style={[styles.priorityBadge, { backgroundColor: tone.bg }]}>
-                      <Text style={[styles.priorityText, { color: tone.color }]}>{tone.label}</Text>
+                    <View style={styles.taskTail}>
+                      <View style={[styles.priorityBadge, { backgroundColor: tone.bg }]}>
+                        <Text style={[styles.priorityText, { color: tone.color }]}>{tone.label}</Text>
+                      </View>
+                      <Ionicons name="chevron-forward" size={16} color={colors.textMuted} />
                     </View>
-                  </View>
+                  </TouchableOpacity>
+                );
+              })
+            )}
+
+            <Text style={[styles.sectionTitle, styles.resourcesTitle]}>{t('home.latestResources')}</Text>
+            {latestResources.length === 0 ? (
+              <StateBlock
+                variant="empty"
+                title={t('home.noResourceTitle')}
+                description={t('home.noResourceDescription')}
+                actionLabel={t('home.seeResources')}
+                onActionPress={() => router.push('/resources')}
+              />
+            ) : (
+              latestResources.map((resource) => {
+                const tone = resourceIconByType[resource.type ?? 'note'];
+                return (
+                  <TouchableOpacity
+                    key={resource.id}
+                    style={styles.resourceCard}
+                    onPress={() => router.push(`/resource-editor?resourceId=${resource.id}`)}>
+                    <View style={[styles.resourceIconWrap, { backgroundColor: tone.bg }]}>
+                      <Ionicons name={tone.icon} size={17} color={tone.color} />
+                    </View>
+                    <View style={styles.resourceMain}>
+                      <Text style={styles.resourceTitle}>{resource.title}</Text>
+                      <Text style={styles.resourceMeta}>{formatDateLabel(resource.created_at, locale, t('common.noDate'))}</Text>
+                    </View>
+                    <Ionicons name="chevron-forward" size={16} color={colors.textMuted} />
+                  </TouchableOpacity>
                 );
               })
             )}
@@ -247,8 +299,34 @@ export default function HomeDashboardScreen() {
         ) : null}
       </ScrollView>
 
-      <TouchableOpacity style={styles.fab} onPress={() => router.push('/task-editor')}>
-        <Ionicons name="add" size={24} color="#FFFFFF" />
+      {fabMenuOpen ? <Pressable style={styles.fabBackdrop} onPress={() => setFabMenuOpen(false)} /> : null}
+
+      {fabMenuOpen ? (
+        <View style={styles.fabMenu}>
+          <TouchableOpacity
+            style={styles.fabMenuItem}
+            onPress={() => {
+              setFabMenuOpen(false);
+              router.push('/task-editor');
+            }}>
+            <Ionicons name="checkmark-circle-outline" size={16} color={colors.text} />
+            <Text style={styles.fabMenuText}>{t('home.quickAddTask')}</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={styles.fabMenuItem}
+            onPress={() => {
+              setFabMenuOpen(false);
+              router.push('/resource-editor');
+            }}>
+            <Ionicons name="folder-open-outline" size={16} color={colors.text} />
+            <Text style={styles.fabMenuText}>{t('home.quickAddResource')}</Text>
+          </TouchableOpacity>
+        </View>
+      ) : null}
+
+      <TouchableOpacity style={styles.fab} onPress={() => setFabMenuOpen((prev) => !prev)}>
+        <Ionicons name={fabMenuOpen ? 'close' : 'add'} size={24} color="#FFFFFF" />
       </TouchableOpacity>
     </View>
   );
@@ -263,9 +341,16 @@ const createStyles = (
     flex: 1,
     backgroundColor: colors.background,
   },
-  content: {
+  stickyHeader: {
     paddingHorizontal: 16,
     paddingTop: 56,
+    paddingBottom: 10,
+    backgroundColor: colors.background,
+    zIndex: 10,
+  },
+  content: {
+    paddingHorizontal: 16,
+    paddingTop: 6,
     paddingBottom: 120,
     gap: 10,
   },
@@ -273,7 +358,6 @@ const createStyles = (
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 10,
   },
   greeting: {
     fontSize: 24,
@@ -406,6 +490,11 @@ const createStyles = (
     color: colors.primary,
     fontWeight: '600',
   },
+  sectionLinksRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
   taskCard: {
     backgroundColor: colors.surface,
     borderRadius: 14,
@@ -419,6 +508,11 @@ const createStyles = (
   taskMain: {
     flex: 1,
     marginRight: 10,
+  },
+  taskTail: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
   },
   taskTitle: {
     fontWeight: '700',
@@ -441,6 +535,39 @@ const createStyles = (
   announcementTitle: {
     marginTop: 8,
     marginBottom: 2,
+  },
+  resourcesTitle: {
+    marginTop: 8,
+    marginBottom: 2,
+  },
+  resourceCard: {
+    backgroundColor: colors.surface,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: colors.border,
+    padding: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  resourceIconWrap: {
+    width: 34,
+    height: 34,
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  resourceMain: {
+    flex: 1,
+  },
+  resourceTitle: {
+    color: colors.text,
+    fontWeight: '700',
+    marginBottom: 3,
+  },
+  resourceMeta: {
+    color: colors.textMuted,
+    fontSize: 12,
   },
   announcementCard: {
     backgroundColor: colors.surface,
@@ -501,5 +628,33 @@ const createStyles = (
     alignItems: 'center',
     justifyContent: 'center',
     ...cardShadow,
+  },
+  fabBackdrop: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'transparent',
+  },
+  fabMenu: {
+    position: 'absolute',
+    right: 18,
+    bottom: 150,
+    gap: 8,
+    alignItems: 'flex-end',
+  },
+  fabMenuItem: {
+    minHeight: 40,
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 9,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.surface,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    ...cardShadow,
+  },
+  fabMenuText: {
+    color: colors.text,
+    fontWeight: '700',
   },
 });
