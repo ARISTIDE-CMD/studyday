@@ -7,6 +7,7 @@ import Swipeable from 'react-native-gesture-handler/Swipeable';
 
 import { ResourceFileIcon } from '@/components/ui/resource-file-icon';
 import { StateBlock } from '@/components/ui/state-block';
+import { TabSwipeShell } from '@/components/ui/tab-swipe-shell';
 import { useAppTheme } from '@/hooks/use-app-theme';
 import { useI18n } from '@/hooks/use-i18n';
 import { getErrorMessage } from '@/lib/errors';
@@ -148,6 +149,7 @@ export default function ResourcesScreen() {
   ];
 
   return (
+    <TabSwipeShell tab="resources">
     <View style={styles.page}>
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
         <View style={styles.header}>
@@ -324,6 +326,7 @@ export default function ResourcesScreen() {
         ) : null}
       </ScrollView>
     </View>
+    </TabSwipeShell>
   );
 }
 

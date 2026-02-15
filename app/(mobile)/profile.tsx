@@ -15,6 +15,7 @@ import {
   View,
 } from 'react-native';
 
+import { TabSwipeShell } from '@/components/ui/tab-swipe-shell';
 import { useAppTheme } from '@/hooks/use-app-theme';
 import { useI18n } from '@/hooks/use-i18n';
 import { getErrorMessage } from '@/lib/errors';
@@ -189,6 +190,7 @@ export default function ProfileScreen() {
   };
 
   return (
+    <TabSwipeShell tab="profile">
     <View style={themedStyles.page}>
       <ScrollView contentContainerStyle={themedStyles.content} showsVerticalScrollIndicator={false}>
         <Text style={themedStyles.title}>{t('profile.title')}</Text>
@@ -331,6 +333,7 @@ export default function ProfileScreen() {
         </View>
       </ScrollView>
     </View>
+    </TabSwipeShell>
   );
 }
 

@@ -7,6 +7,7 @@ import { ActivityIndicator, Animated, Easing, Pressable, ScrollView, StyleSheet,
 
 import { ResourceFileIcon } from '@/components/ui/resource-file-icon';
 import { StateBlock } from '@/components/ui/state-block';
+import { TabSwipeShell } from '@/components/ui/tab-swipe-shell';
 import { useAppTheme } from '@/hooks/use-app-theme';
 import { useI18n } from '@/hooks/use-i18n';
 import { getErrorMessage } from '@/lib/errors';
@@ -25,6 +26,8 @@ export default function HomeDashboardScreen() {
   const [error, setError] = useState('');
   const [todoCount, setTodoCount] = useState(0);
   const [overdueCount, setOverdueCount] = useState(0);
+  const [tasksCount, setTasksCount] = useState(0);
+  const [resourcesCount, setResourcesCount] = useState(0);
   const [nextTasks, setNextTasks] = useState<Task[]>([]);
   const [latestResources, setLatestResources] = useState<Resource[]>([]);
   const [latestAnnouncement, setLatestAnnouncement] = useState<Announcement | null>(null);
@@ -180,6 +183,8 @@ export default function HomeDashboardScreen() {
   const applySummary = useCallback((summary: Awaited<ReturnType<typeof fetchDashboardSummary>>) => {
     setTodoCount(summary.todoCount);
     setOverdueCount(summary.overdueCount);
+    setTasksCount(summary.totalTasks);
+    setResourcesCount(summary.totalResources);
     setNextTasks(summary.tasks.filter((task) => task.status !== 'done').slice(0, 3));
     setLatestResources(summary.latestResources);
     setLatestAnnouncement(summary.latestAnnouncement);
@@ -394,12 +399,17 @@ export default function HomeDashboardScreen() {
   };
 
   return (
+    <TabSwipeShell tab="home">
     <View style={styles.page}>
       <View style={styles.stickyHeader}>
         <View style={styles.headerRow}>
-          <View>
-            <Text style={styles.greeting}>{t('home.greeting', { name: displayName })}</Text>
-            <Text style={styles.subtitle}>{t('home.subtitle')}</Text>
+          <View style={styles.greetingWrap}>
+            <Text style={styles.greeting} numberOfLines={1} ellipsizeMode="tail">
+              {t('home.greeting', { name: displayName })}
+            </Text>
+            <Text style={styles.subtitle} numberOfLines={1} ellipsizeMode="tail">
+              {t('home.subtitle')}
+            </Text>
           </View>
 
           <View style={styles.headerActions}>
@@ -471,10 +481,7 @@ export default function HomeDashboardScreen() {
               <Text style={styles.sectionTitle}>{t('home.nextTasks')}</Text>
               <View style={styles.sectionLinksRow}>
                 <TouchableOpacity onPress={() => router.push('/tasks')}>
-                  <Text style={styles.sectionLink}>{t('home.seeAll')}</Text>
-                </TouchableOpacity>
-                <TouchableOpacity onPress={() => router.push('/resources')}>
-                  <Text style={styles.sectionLink}>{t('home.seeResources')}</Text>
+                  <Text style={styles.sectionLink}>{`${t('home.seeAll')} (${tasksCount})`}</Text>
                 </TouchableOpacity>
               </View>
             </View>
@@ -507,7 +514,12 @@ export default function HomeDashboardScreen() {
               })
             )}
 
-            <Text style={[styles.sectionTitle, styles.resourcesTitle]}>{t('home.latestResources')}</Text>
+            <View style={[styles.sectionHeader, styles.resourcesHeader]}>
+              <Text style={[styles.sectionTitle, styles.resourcesTitle]}>{t('home.latestResources')}</Text>
+              <TouchableOpacity onPress={() => router.push('/resources')}>
+                <Text style={styles.sectionLink}>{`${t('home.seeResources')} (${resourcesCount})`}</Text>
+              </TouchableOpacity>
+            </View>
             {latestResources.length === 0 ? (
               <StateBlock
                 variant="empty"
@@ -608,6 +620,7 @@ export default function HomeDashboardScreen() {
         </TouchableOpacity>
       </Animated.View>
     </View>
+    </TabSwipeShell>
   );
 }
 
@@ -637,6 +650,11 @@ const createStyles = (
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
+  },
+  greetingWrap: {
+    flex: 1,
+    minWidth: 0,
+    marginRight: 10,
   },
   greeting: {
     fontSize: 24,
@@ -829,6 +847,10 @@ const createStyles = (
     marginBottom: 2,
   },
   resourcesTitle: {
+    marginTop: 0,
+    marginBottom: 0,
+  },
+  resourcesHeader: {
     marginTop: 8,
     marginBottom: 2,
   },

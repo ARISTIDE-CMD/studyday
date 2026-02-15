@@ -6,6 +6,7 @@ import { Alert, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'rea
 import Swipeable from 'react-native-gesture-handler/Swipeable';
 
 import { StateBlock } from '@/components/ui/state-block';
+import { TabSwipeShell } from '@/components/ui/tab-swipe-shell';
 import { useAppTheme } from '@/hooks/use-app-theme';
 import { useI18n } from '@/hooks/use-i18n';
 import { getErrorMessage } from '@/lib/errors';
@@ -181,6 +182,7 @@ export default function TasksScreen() {
   ];
 
   return (
+    <TabSwipeShell tab="tasks">
     <View style={themedStyles.page}>
       <ScrollView contentContainerStyle={themedStyles.content} showsVerticalScrollIndicator={false}>
         <View style={themedStyles.header}>
@@ -348,6 +350,7 @@ export default function TasksScreen() {
         ) : null}
       </ScrollView>
     </View>
+    </TabSwipeShell>
   );
 }
 

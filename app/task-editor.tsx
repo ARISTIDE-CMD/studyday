@@ -215,6 +215,8 @@ export default function TaskEditorScreen() {
     setCalendarVisible(true);
   };
 
+  const todayIso = toIsoDate();
+
   return (
     <KeyboardAvoidingView style={styles.page} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
@@ -327,16 +329,30 @@ export default function TaskEditorScreen() {
                   return <View key={cell.key} style={styles.calendarCell} />;
                 }
 
+                const isPast = cell.iso < todayIso;
                 const selected = dueDate === cell.iso;
                 return (
                   <TouchableOpacity
                     key={cell.key}
-                    style={[styles.calendarCell, styles.calendarDayBtn, selected && styles.calendarDayBtnActive]}
+                    style={[
+                      styles.calendarCell,
+                      styles.calendarDayBtn,
+                      selected && !isPast && styles.calendarDayBtnActive,
+                      isPast && styles.calendarDayBtnPast,
+                    ]}
+                    disabled={isPast}
                     onPress={() => {
                       setDueDate(cell.iso as string);
                       setCalendarVisible(false);
                     }}>
-                    <Text style={[styles.calendarDayText, selected && styles.calendarDayTextActive]}>{cell.day}</Text>
+                    <Text
+                      style={[
+                        styles.calendarDayText,
+                        selected && !isPast && styles.calendarDayTextActive,
+                        isPast && styles.calendarDayTextPast,
+                      ]}>
+                      {cell.day}
+                    </Text>
                   </TouchableOpacity>
                 );
               })}
@@ -545,12 +561,19 @@ const createStyles = (colors: ReturnType<typeof useAppTheme>['colors']) =>
   calendarDayBtn: {
     borderRadius: 9,
   },
+  calendarDayBtnPast: {
+    backgroundColor: colors.background,
+    opacity: 0.5,
+  },
   calendarDayBtnActive: {
     backgroundColor: colors.primary,
   },
   calendarDayText: {
     color: colors.text,
     fontWeight: '600',
+  },
+  calendarDayTextPast: {
+    color: colors.textMuted,
   },
   calendarDayTextActive: {
     color: '#FFFFFF',

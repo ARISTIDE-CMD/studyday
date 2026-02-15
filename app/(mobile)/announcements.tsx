@@ -5,6 +5,7 @@ import React, { useCallback, useMemo, useState } from 'react';
 import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 
 import { StateBlock } from '@/components/ui/state-block';
+import { TabSwipeShell } from '@/components/ui/tab-swipe-shell';
 import { useAppTheme } from '@/hooks/use-app-theme';
 import { useI18n } from '@/hooks/use-i18n';
 import { getErrorMessage } from '@/lib/errors';
@@ -44,6 +45,7 @@ export default function AnnouncementsScreen() {
   const effectiveState = loading ? 'loading' : error ? 'error' : announcements.length === 0 ? 'empty' : 'auto';
 
   return (
+    <TabSwipeShell tab="announcements">
     <View style={styles.page}>
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
         <View style={styles.header}>
@@ -105,6 +107,7 @@ export default function AnnouncementsScreen() {
         ) : null}
       </ScrollView>
     </View>
+    </TabSwipeShell>
   );
 }
 

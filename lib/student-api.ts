@@ -566,6 +566,8 @@ export async function fetchDashboardSummary(userId: string) {
 
   return {
     tasks,
+    totalTasks: tasks.length,
+    totalResources: resources.length,
     latestResources: resources.slice(0, 3),
     todoCount: todoTasks.length,
     overdueCount: overdue.length,
@@ -583,6 +585,8 @@ export async function getCachedDashboardSummary(userId: string) {
 
   return {
     tasks,
+    totalTasks: tasks.length,
+    totalResources: resources.length,
     latestResources: resources.slice(0, 3),
     todoCount: todoTasks.length,
     overdueCount: overdue.length,
