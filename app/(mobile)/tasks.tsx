@@ -2,7 +2,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
 import { router } from 'expo-router';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Alert, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { Alert, RefreshControl, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import Swipeable from 'react-native-gesture-handler/Swipeable';
 
 import { StateBlock } from '@/components/ui/state-block';
@@ -12,11 +12,13 @@ import { useI18n } from '@/hooks/use-i18n';
 import { getErrorMessage } from '@/lib/errors';
 import { formatDateLabel, toIsoDate } from '@/lib/format';
 import { deleteTask, fetchTasks, getCachedTasks, updateTask } from '@/lib/student-api';
+import { getUserPreferences, toggleFavoriteTask } from '@/lib/user-preferences';
 import { useAuth } from '@/providers/auth-provider';
 import type { Task } from '@/types/supabase';
 
 type Filter = 'toutes' | 'a-faire' | 'archivees';
 type WindowFilter = 'toutes-dates' | 'aujourdhui' | 'semaine';
+type SortMode = 'due' | 'priority' | 'recent' | 'favorites';
 
 function SwipeAction({ label, color }: { label: string; color: string }) {
   return (
@@ -46,8 +48,15 @@ export default function TasksScreen() {
   const [error, setError] = useState('');
   const [filter, setFilter] = useState<Filter>('toutes');
   const [windowFilter, setWindowFilter] = useState<WindowFilter>('toutes-dates');
+  const [sortMode, setSortMode] = useState<SortMode>('due');
   const [tasks, setTasks] = useState<Task[]>([]);
+  const [favoriteTaskIds, setFavoriteTaskIds] = useState<string[]>([]);
+  const [refreshing, setRefreshing] = useState(false);
   const [selectedTaskIds, setSelectedTaskIds] = useState<string[]>([]);
+  const [pendingSwipeDelete, setPendingSwipeDelete] = useState<{
+    task: Task;
+    timeoutId: ReturnType<typeof setTimeout>;
+  } | null>(null);
 
   const themedStyles = useMemo(() => createStyles(colors, cardShadow), [cardShadow, colors]);
   const priorityStyle = useMemo(
@@ -87,11 +96,27 @@ export default function TasksScreen() {
     }
   }, [t, user?.id]);
 
+  const loadPreferences = useCallback(async () => {
+    if (!user?.id) return;
+    const preferences = await getUserPreferences(user.id);
+    setFavoriteTaskIds(preferences.favoriteTaskIds);
+  }, [user?.id]);
+
   useFocusEffect(
     useCallback(() => {
       void loadTasks();
-    }, [loadTasks])
+      void loadPreferences();
+    }, [loadPreferences, loadTasks])
   );
+
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true);
+    try {
+      await Promise.all([loadTasks(), loadPreferences()]);
+    } finally {
+      setRefreshing(false);
+    }
+  }, [loadPreferences, loadTasks]);
 
   useEffect(() => {
     setSelectedTaskIds((prev) => prev.filter((taskId) => tasks.some((task) => task.id === taskId)));
@@ -111,8 +136,35 @@ export default function TasksScreen() {
       data = data.filter((task) => isInThisWeek(task.due_date));
     }
 
+    if (sortMode === 'priority') {
+      const rank: Record<Task['priority'], number> = { high: 0, medium: 1, low: 2 };
+      data.sort((a, b) => rank[a.priority] - rank[b.priority]);
+      return data;
+    }
+
+    if (sortMode === 'recent') {
+      data.sort((a, b) => (b.created_at ?? '').localeCompare(a.created_at ?? ''));
+      return data;
+    }
+
+    if (sortMode === 'favorites') {
+      data = data.filter((task) => favoriteTaskIds.includes(task.id));
+      data.sort((a, b) => {
+        const aDate = a.due_date ?? '9999-12-31';
+        const bDate = b.due_date ?? '9999-12-31';
+        return aDate.localeCompare(bDate);
+      });
+      return data;
+    }
+
+    data.sort((a, b) => {
+      if (!a.due_date && !b.due_date) return (b.created_at ?? '').localeCompare(a.created_at ?? '');
+      if (!a.due_date) return 1;
+      if (!b.due_date) return -1;
+      return a.due_date.localeCompare(b.due_date);
+    });
     return data;
-  }, [filter, tasks, windowFilter]);
+  }, [favoriteTaskIds, filter, sortMode, tasks, windowFilter]);
 
   const effectiveState = loading ? 'loading' : error ? 'error' : tasks.length === 0 ? 'empty' : 'auto';
   const isSelectionMode = selectedTaskIds.length > 0;
@@ -162,11 +214,79 @@ export default function TasksScreen() {
     }
   };
 
+  useEffect(() => {
+    return () => {
+      if (pendingSwipeDelete) {
+        clearTimeout(pendingSwipeDelete.timeoutId);
+      }
+    };
+  }, [pendingSwipeDelete]);
+
+  const commitTaskDelete = useCallback(
+    async (taskId: string) => {
+      if (!user?.id) return;
+      try {
+        await deleteTask(taskId, user.id);
+      } catch {
+        void loadTasks();
+        Alert.alert(t('common.networkErrorTitle'), t('tasks.deleteError'));
+      }
+    },
+    [loadTasks, t, user?.id]
+  );
+
+  const scheduleSwipeDeleteTask = useCallback(
+    (task: Task) => {
+      if (!user?.id) return;
+
+      if (pendingSwipeDelete) {
+        clearTimeout(pendingSwipeDelete.timeoutId);
+        void commitTaskDelete(pendingSwipeDelete.task.id);
+      }
+
+      setTasks((prev) => prev.filter((row) => row.id !== task.id));
+      setSelectedTaskIds((prev) => prev.filter((id) => id !== task.id));
+
+      const timeoutId = setTimeout(() => {
+        void commitTaskDelete(task.id);
+        setPendingSwipeDelete((current) => (current?.task.id === task.id ? null : current));
+      }, 3600);
+
+      setPendingSwipeDelete({ task, timeoutId });
+    },
+    [commitTaskDelete, pendingSwipeDelete, user?.id]
+  );
+
+  const undoSwipeDelete = () => {
+    if (!pendingSwipeDelete) return;
+    clearTimeout(pendingSwipeDelete.timeoutId);
+    setTasks((prev) => {
+      if (prev.some((task) => task.id === pendingSwipeDelete.task.id)) return prev;
+      return [pendingSwipeDelete.task, ...prev];
+    });
+    setPendingSwipeDelete(null);
+  };
+
   const openSelectedTaskEditor = () => {
     if (selectedTaskIds.length !== 1) return;
     const [taskId] = selectedTaskIds;
     clearSelection();
     router.push(`/task-editor?taskId=${taskId}`);
+  };
+
+  const onToggleFavoriteTask = async (taskId: string) => {
+    if (!user?.id) return;
+    const previous = favoriteTaskIds;
+    const next = previous.includes(taskId)
+      ? previous.filter((id) => id !== taskId)
+      : [taskId, ...previous];
+    setFavoriteTaskIds(next);
+    try {
+      const updated = await toggleFavoriteTask(user.id, taskId);
+      setFavoriteTaskIds(updated.favoriteTaskIds);
+    } catch {
+      setFavoriteTaskIds(previous);
+    }
   };
 
   const filterLabels: { key: Filter; label: string }[] = [
@@ -180,11 +300,20 @@ export default function TasksScreen() {
     { key: 'aujourdhui', label: t('common.today') },
     { key: 'semaine', label: t('common.week') },
   ];
+  const sortLabels: { key: SortMode; label: string }[] = [
+    { key: 'due', label: t('tasks.sortDue') },
+    { key: 'priority', label: t('tasks.sortPriority') },
+    { key: 'recent', label: t('tasks.sortRecent') },
+    { key: 'favorites', label: t('tasks.sortFavorites') },
+  ];
 
   return (
     <TabSwipeShell tab="tasks">
     <View style={themedStyles.page}>
-      <ScrollView contentContainerStyle={themedStyles.content} showsVerticalScrollIndicator={false}>
+      <ScrollView
+        contentContainerStyle={themedStyles.content}
+        showsVerticalScrollIndicator={false}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => void onRefresh()} tintColor={colors.primary} />}>
         <View style={themedStyles.header}>
           <View>
             <Text style={themedStyles.title}>{t('tasks.title')}</Text>
@@ -213,6 +342,17 @@ export default function TasksScreen() {
               style={[themedStyles.windowChip, windowFilter === item.key && themedStyles.windowChipActive]}
               onPress={() => setWindowFilter(item.key)}>
               <Text style={[themedStyles.windowText, windowFilter === item.key && themedStyles.windowTextActive]}>{item.label}</Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+
+        <View style={themedStyles.windowRow}>
+          {sortLabels.map((item) => (
+            <TouchableOpacity
+              key={item.key}
+              style={[themedStyles.windowChip, sortMode === item.key && themedStyles.windowChipActive]}
+              onPress={() => setSortMode(item.key)}>
+              <Text style={[themedStyles.windowText, sortMode === item.key && themedStyles.windowTextActive]}>{item.label}</Text>
             </TouchableOpacity>
           ))}
         </View>
@@ -295,6 +435,7 @@ export default function TasksScreen() {
                 const done = task.status === 'done';
                 const selected = selectedTaskIds.includes(task.id);
                 const isMarked = isSelectionMode ? selected : done;
+                const favorite = favoriteTaskIds.includes(task.id);
 
                 const card = (
                   <TouchableOpacity
@@ -326,6 +467,18 @@ export default function TasksScreen() {
                       <Text style={themedStyles.meta}>{formatDateLabel(task.due_date, locale, t('common.noDate'))}</Text>
                     </View>
 
+                    {!isSelectionMode ? (
+                      <TouchableOpacity
+                        style={themedStyles.favoriteBtn}
+                        onPress={() => void onToggleFavoriteTask(task.id)}>
+                        <Ionicons
+                          name={favorite ? 'star' : 'star-outline'}
+                          size={16}
+                          color={favorite ? colors.warning : colors.textMuted}
+                        />
+                      </TouchableOpacity>
+                    ) : null}
+
                     <View style={[themedStyles.priorityBadge, { backgroundColor: tone.bg }]}>
                       <Text style={[themedStyles.priorityText, { color: tone.color }]}>{tone.label}</Text>
                     </View>
@@ -340,7 +493,7 @@ export default function TasksScreen() {
                     renderLeftActions={() => <SwipeAction label={t('tasks.swipeEdit')} color={colors.success} />}
                     onSwipeableLeftOpen={() => router.push(`/task-editor?taskId=${task.id}`)}
                     renderRightActions={() => <SwipeAction label={t('tasks.swipeDelete')} color={colors.danger} />}
-                    onSwipeableRightOpen={() => void removeTasks([task.id])}>
+                    onSwipeableRightOpen={() => scheduleSwipeDeleteTask(task)}>
                     {card}
                   </Swipeable>
                 );
@@ -349,6 +502,15 @@ export default function TasksScreen() {
           </View>
         ) : null}
       </ScrollView>
+
+      {pendingSwipeDelete ? (
+        <View style={themedStyles.undoBar}>
+          <Text style={themedStyles.undoText}>{t('tasks.undoDeleteMessage')}</Text>
+          <TouchableOpacity style={themedStyles.undoBtn} onPress={undoSwipeDelete}>
+            <Text style={themedStyles.undoBtnText}>{t('common.undo')}</Text>
+          </TouchableOpacity>
+        </View>
+      ) : null}
     </View>
     </TabSwipeShell>
   );
@@ -561,6 +723,14 @@ const createStyles = (
       flex: 1,
       marginRight: 10,
     },
+    favoriteBtn: {
+      width: 28,
+      height: 28,
+      borderRadius: 8,
+      alignItems: 'center',
+      justifyContent: 'center',
+      marginRight: 6,
+    },
     taskTitle: {
       color: colors.text,
       fontWeight: '700',
@@ -582,5 +752,41 @@ const createStyles = (
     priorityText: {
       fontSize: 11,
       fontWeight: '700',
+    },
+    undoBar: {
+      position: 'absolute',
+      left: 14,
+      right: 14,
+      bottom: 18,
+      borderRadius: 12,
+      borderWidth: 1,
+      borderColor: colors.border,
+      backgroundColor: colors.surface,
+      paddingHorizontal: 12,
+      paddingVertical: 10,
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      gap: 10,
+      ...cardShadow,
+    },
+    undoText: {
+      flex: 1,
+      color: colors.text,
+      fontWeight: '600',
+      fontSize: 13,
+    },
+    undoBtn: {
+      borderRadius: 999,
+      paddingHorizontal: 12,
+      paddingVertical: 7,
+      backgroundColor: colors.primarySoft,
+      borderWidth: 1,
+      borderColor: colors.primary,
+    },
+    undoBtnText: {
+      color: colors.primary,
+      fontWeight: '800',
+      fontSize: 12,
     },
   });

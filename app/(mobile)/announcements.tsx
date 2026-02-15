@@ -2,7 +2,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
 import { router } from 'expo-router';
 import React, { useCallback, useMemo, useState } from 'react';
-import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { RefreshControl, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 
 import { StateBlock } from '@/components/ui/state-block';
 import { TabSwipeShell } from '@/components/ui/tab-swipe-shell';
@@ -18,6 +18,7 @@ export default function AnnouncementsScreen() {
   const { t, locale } = useI18n();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [refreshing, setRefreshing] = useState(false);
   const [announcements, setAnnouncements] = useState<Announcement[]>([]);
 
   const styles = useMemo(() => createStyles(colors, cardShadow), [cardShadow, colors]);
@@ -42,12 +43,24 @@ export default function AnnouncementsScreen() {
     }, [loadAnnouncements])
   );
 
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true);
+    try {
+      await loadAnnouncements();
+    } finally {
+      setRefreshing(false);
+    }
+  }, [loadAnnouncements]);
+
   const effectiveState = loading ? 'loading' : error ? 'error' : announcements.length === 0 ? 'empty' : 'auto';
 
   return (
     <TabSwipeShell tab="announcements">
     <View style={styles.page}>
-      <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+      <ScrollView
+        contentContainerStyle={styles.content}
+        showsVerticalScrollIndicator={false}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => void onRefresh()} tintColor={colors.primary} />}>
         <View style={styles.header}>
           <Text style={styles.title}>{t('announcements.title')}</Text>
           <Ionicons name="notifications-outline" size={22} color={colors.text} />

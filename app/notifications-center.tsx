@@ -1,7 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
-import { useFocusEffect } from '@react-navigation/native';
 import { router } from 'expo-router';
-import React, { useCallback, useMemo } from 'react';
+import React, { useMemo, useState } from 'react';
 import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 
 import { StateBlock } from '@/components/ui/state-block';
@@ -14,12 +13,20 @@ export default function NotificationsCenterScreen() {
   const { colors } = useAppTheme();
   const { t, locale } = useI18n();
   const { activityNotifications, markAllActivityAsRead, markActivityAsRead } = useInAppNotification();
+  const [filter, setFilter] = useState<'all' | 'unread'>('all');
   const styles = useMemo(() => createStyles(colors), [colors]);
 
-  useFocusEffect(
-    useCallback(() => {
-      void markAllActivityAsRead();
-    }, [markAllActivityAsRead])
+  const unreadCount = useMemo(
+    () => activityNotifications.filter((item) => !item.readAt).length,
+    [activityNotifications]
+  );
+
+  const visibleNotifications = useMemo(
+    () =>
+      filter === 'unread'
+        ? activityNotifications.filter((item) => !item.readAt)
+        : activityNotifications,
+    [activityNotifications, filter]
   );
 
   const onView = async (notificationId: string, entityType: 'task' | 'resource', entityId: string) => {
@@ -40,17 +47,44 @@ export default function NotificationsCenterScreen() {
         </TouchableOpacity>
         <Text style={styles.title}>{t('activityNotifications.title')}</Text>
         <Text style={styles.subtitle}>{t('activityNotifications.subtitle')}</Text>
+
+        <View style={styles.actionsRow}>
+          <View style={styles.filterRow}>
+            <TouchableOpacity
+              style={[styles.filterChip, filter === 'all' && styles.filterChipActive]}
+              onPress={() => setFilter('all')}>
+              <Text style={[styles.filterText, filter === 'all' && styles.filterTextActive]}>
+                {t('activityNotifications.filterAll')}
+              </Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[styles.filterChip, filter === 'unread' && styles.filterChipActive]}
+              onPress={() => setFilter('unread')}>
+              <Text style={[styles.filterText, filter === 'unread' && styles.filterTextActive]}>
+                {`${t('activityNotifications.filterUnread')} (${unreadCount})`}
+              </Text>
+            </TouchableOpacity>
+          </View>
+
+          <TouchableOpacity
+            style={[styles.markAllBtn, unreadCount === 0 && styles.markAllBtnDisabled]}
+            disabled={unreadCount === 0}
+            onPress={() => void markAllActivityAsRead()}>
+            <Text style={styles.markAllText}>{t('activityNotifications.markAllRead')}</Text>
+          </TouchableOpacity>
+        </View>
       </View>
 
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-        {activityNotifications.length === 0 ? (
+        {visibleNotifications.length === 0 ? (
           <StateBlock
             variant="empty"
             title={t('activityNotifications.emptyTitle')}
             description={t('activityNotifications.emptyDescription')}
           />
         ) : (
-          activityNotifications.map((item) => (
+          visibleNotifications.map((item) => (
             <View key={item.id} style={styles.card}>
               <View style={styles.cardHead}>
                 <View
@@ -63,11 +97,13 @@ export default function NotificationsCenterScreen() {
                       ? t('activityNotifications.taskLabel')
                       : t('activityNotifications.resourceLabel')}
                   </Text>
-                </View>
+                    </View>
                 <Text style={styles.dateText}>
                   {formatDateLabel(item.createdAt, locale, t('common.noDate'))}
                 </Text>
               </View>
+
+              {!item.readAt ? <View style={styles.unreadDot} /> : null}
 
               <Text style={styles.cardTitle}>{item.title}</Text>
               <Text style={styles.cardMessage}>{item.message}</Text>
@@ -122,6 +158,52 @@ const createStyles = (colors: ReturnType<typeof useAppTheme>['colors']) =>
     subtitle: {
       color: colors.textMuted,
     },
+    actionsRow: {
+      marginTop: 12,
+      gap: 10,
+    },
+    filterRow: {
+      flexDirection: 'row',
+      gap: 8,
+      flexWrap: 'wrap',
+    },
+    filterChip: {
+      borderRadius: 999,
+      borderWidth: 1,
+      borderColor: colors.border,
+      backgroundColor: colors.surface,
+      paddingHorizontal: 10,
+      paddingVertical: 6,
+    },
+    filterChipActive: {
+      borderColor: colors.primary,
+      backgroundColor: colors.primarySoft,
+    },
+    filterText: {
+      color: colors.textMuted,
+      fontSize: 12,
+      fontWeight: '600',
+    },
+    filterTextActive: {
+      color: colors.primary,
+    },
+    markAllBtn: {
+      alignSelf: 'flex-start',
+      borderRadius: 999,
+      borderWidth: 1,
+      borderColor: colors.border,
+      backgroundColor: colors.surface,
+      paddingHorizontal: 10,
+      paddingVertical: 7,
+    },
+    markAllBtnDisabled: {
+      opacity: 0.45,
+    },
+    markAllText: {
+      color: colors.text,
+      fontWeight: '700',
+      fontSize: 12,
+    },
     content: {
       paddingHorizontal: 16,
       paddingTop: 6,
@@ -129,6 +211,7 @@ const createStyles = (colors: ReturnType<typeof useAppTheme>['colors']) =>
       gap: 10,
     },
     card: {
+      position: 'relative',
       backgroundColor: colors.surface,
       borderRadius: 14,
       borderWidth: 1,
@@ -162,6 +245,15 @@ const createStyles = (colors: ReturnType<typeof useAppTheme>['colors']) =>
       color: colors.textMuted,
       fontSize: 12,
     },
+    unreadDot: {
+      position: 'absolute',
+      right: 11,
+      top: 11,
+      width: 8,
+      height: 8,
+      borderRadius: 4,
+      backgroundColor: colors.danger,
+    },
     cardTitle: {
       color: colors.text,
       fontSize: 15,
@@ -190,4 +282,3 @@ const createStyles = (colors: ReturnType<typeof useAppTheme>['colors']) =>
       fontSize: 12,
     },
   });
-

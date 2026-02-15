@@ -69,6 +69,7 @@ function RootNavigator() {
         <Stack.Screen name="resource/[id]" />
         <Stack.Screen name="announcement/[id]" />
         <Stack.Screen name="notifications-center" />
+        <Stack.Screen name="search" />
       </Stack>
       <StatusBar style={isDark ? 'light' : 'dark'} />
     </ThemeProvider>

@@ -3,16 +3,19 @@ import { useFocusEffect } from '@react-navigation/native';
 import { Image } from 'expo-image';
 import { router } from 'expo-router';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, Animated, Easing, Pressable, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Animated, Easing, Modal, Pressable, RefreshControl, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 
 import { ResourceFileIcon } from '@/components/ui/resource-file-icon';
 import { StateBlock } from '@/components/ui/state-block';
 import { TabSwipeShell } from '@/components/ui/tab-swipe-shell';
+import { SyncStatusBanner } from '@/components/ui/sync-status-banner';
 import { useAppTheme } from '@/hooks/use-app-theme';
 import { useI18n } from '@/hooks/use-i18n';
+import { loadAppFlags, saveAppFlags } from '@/lib/app-flags';
 import { getErrorMessage } from '@/lib/errors';
 import { fetchDashboardSummary, getCachedDashboardSummary } from '@/lib/student-api';
 import { formatDateLabel, humanNow } from '@/lib/format';
+import { getUserPreferences, toggleFavoriteResource, toggleFavoriteTask } from '@/lib/user-preferences';
 import { useAuth } from '@/providers/auth-provider';
 import { useInAppNotification } from '@/providers/notification-provider';
 import type { Announcement, Resource, Task } from '@/types/supabase';
@@ -31,6 +34,10 @@ export default function HomeDashboardScreen() {
   const [nextTasks, setNextTasks] = useState<Task[]>([]);
   const [latestResources, setLatestResources] = useState<Resource[]>([]);
   const [latestAnnouncement, setLatestAnnouncement] = useState<Announcement | null>(null);
+  const [favoriteTaskIds, setFavoriteTaskIds] = useState<string[]>([]);
+  const [favoriteResourceIds, setFavoriteResourceIds] = useState<string[]>([]);
+  const [refreshing, setRefreshing] = useState(false);
+  const [tourVisible, setTourVisible] = useState(false);
   const [avatarImageError, setAvatarImageError] = useState(false);
   const [fabMenuOpen, setFabMenuOpen] = useState(false);
   const [fabMenuVisible, setFabMenuVisible] = useState(false);
@@ -76,6 +83,7 @@ export default function HomeDashboardScreen() {
       .join('');
     return value || 'E';
   }, [displayName]);
+  const isConnected = Boolean(user?.id);
   const styles = useMemo(() => createStyles(colors, cardShadow), [cardShadow, colors]);
   const priorityStyle = useMemo(
     () => ({
@@ -218,11 +226,50 @@ export default function HomeDashboardScreen() {
     }
   }, [applySummary, t, user?.id]);
 
+  const loadPreferences = useCallback(async () => {
+    if (!user?.id) return;
+    const preferences = await getUserPreferences(user.id);
+    setFavoriteTaskIds(preferences.favoriteTaskIds);
+    setFavoriteResourceIds(preferences.favoriteResourceIds);
+  }, [user?.id]);
+
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true);
+    try {
+      await Promise.all([loadData(), loadPreferences()]);
+    } finally {
+      setRefreshing(false);
+    }
+  }, [loadData, loadPreferences]);
+
   useFocusEffect(
     useCallback(() => {
       void loadData();
-    }, [loadData])
+      void loadPreferences();
+    }, [loadData, loadPreferences])
   );
+
+  useEffect(() => {
+    let active = true;
+
+    const run = async () => {
+      const flags = await loadAppFlags();
+      if (active && !flags.homeTourSeen) {
+        setTourVisible(true);
+      }
+    };
+
+    void run();
+
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const closeTour = async () => {
+    setTourVisible(false);
+    await saveAppFlags({ homeTourSeen: true });
+  };
 
   const avatarPulseStyle = useMemo(
     () => ({
@@ -398,6 +445,54 @@ export default function HomeDashboardScreen() {
     setFabMenuOpen((prev) => !prev);
   };
 
+  const onToggleFavoriteTask = async (taskId: string) => {
+    if (!user?.id) return;
+    const previous = favoriteTaskIds;
+    const next = previous.includes(taskId) ? previous.filter((id) => id !== taskId) : [taskId, ...previous];
+    setFavoriteTaskIds(next);
+    try {
+      const updated = await toggleFavoriteTask(user.id, taskId);
+      setFavoriteTaskIds(updated.favoriteTaskIds);
+    } catch {
+      setFavoriteTaskIds(previous);
+    }
+  };
+
+  const onToggleFavoriteResource = async (resourceId: string) => {
+    if (!user?.id) return;
+    const previous = favoriteResourceIds;
+    const next = previous.includes(resourceId)
+      ? previous.filter((id) => id !== resourceId)
+      : [resourceId, ...previous];
+    setFavoriteResourceIds(next);
+    try {
+      const updated = await toggleFavoriteResource(user.id, resourceId);
+      setFavoriteResourceIds(updated.favoriteResourceIds);
+    } catch {
+      setFavoriteResourceIds(previous);
+    }
+  };
+
+  const prioritizedTasks = useMemo(() => {
+    if (nextTasks.length <= 1) return nextTasks;
+    return [...nextTasks].sort((a, b) => {
+      const aFav = favoriteTaskIds.includes(a.id) ? 0 : 1;
+      const bFav = favoriteTaskIds.includes(b.id) ? 0 : 1;
+      if (aFav !== bFav) return aFav - bFav;
+      return (a.due_date ?? '9999-12-31').localeCompare(b.due_date ?? '9999-12-31');
+    });
+  }, [favoriteTaskIds, nextTasks]);
+
+  const prioritizedResources = useMemo(() => {
+    if (latestResources.length <= 1) return latestResources;
+    return [...latestResources].sort((a, b) => {
+      const aFav = favoriteResourceIds.includes(a.id) ? 0 : 1;
+      const bFav = favoriteResourceIds.includes(b.id) ? 0 : 1;
+      if (aFav !== bFav) return aFav - bFav;
+      return (b.created_at ?? '').localeCompare(a.created_at ?? '');
+    });
+  }, [favoriteResourceIds, latestResources]);
+
   return (
     <TabSwipeShell tab="home">
     <View style={styles.page}>
@@ -414,8 +509,19 @@ export default function HomeDashboardScreen() {
 
           <View style={styles.headerActions}>
             <TouchableOpacity style={styles.avatarButton} onPress={() => router.push('/profile')}>
-              <Animated.View pointerEvents="none" style={[styles.avatarPulseRing, avatarPulseStyle]} />
-              <View style={styles.avatarOuter}>
+              <Animated.View
+                pointerEvents="none"
+                style={[
+                  styles.avatarPulseRing,
+                  avatarPulseStyle,
+                  { borderColor: isConnected ? colors.success : colors.danger },
+                ]}
+              />
+              <View
+                style={[
+                  styles.avatarOuter,
+                  { borderColor: isConnected ? colors.success : colors.danger },
+                ]}>
                 <View style={styles.avatarInner}>
                   {avatarUrl && !avatarImageError ? (
                     <Image
@@ -429,6 +535,21 @@ export default function HomeDashboardScreen() {
                   )}
                 </View>
               </View>
+              <View
+                style={[
+                  styles.avatarStatusDot,
+                  {
+                    backgroundColor: isConnected ? colors.success : colors.danger,
+                    borderColor: colors.surface,
+                  },
+                ]}
+              />
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.notificationButton}
+              onPress={() => router.push('/search')}>
+              <Ionicons name="search-outline" size={20} color={colors.text} />
             </TouchableOpacity>
 
             <TouchableOpacity
@@ -441,7 +562,11 @@ export default function HomeDashboardScreen() {
         </View>
       </View>
 
-      <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+      <ScrollView
+        contentContainerStyle={styles.content}
+        showsVerticalScrollIndicator={false}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => void onRefresh()} tintColor={colors.primary} />}>
+        <SyncStatusBanner />
 
         <Animated.View style={[styles.dayCard, dayCardAnimatedStyle]}>
           <Text style={styles.dayLabel}>{t('home.daySummary')}</Text>
@@ -495,8 +620,9 @@ export default function HomeDashboardScreen() {
                 onActionPress={() => router.push('/task-editor')}
               />
             ) : (
-              nextTasks.map((task) => {
+              prioritizedTasks.map((task) => {
                 const tone = priorityStyle[task.priority];
+                const favorite = favoriteTaskIds.includes(task.id);
                 return (
                   <TouchableOpacity key={task.id} style={styles.taskCard} onPress={() => router.push(`/task/${task.id}`)}>
                     <View style={styles.taskMain}>
@@ -504,6 +630,18 @@ export default function HomeDashboardScreen() {
                       <Text style={styles.taskMeta}>{formatDateLabel(task.due_date, locale, t('common.noDate'))}</Text>
                     </View>
                     <View style={styles.taskTail}>
+                      <TouchableOpacity
+                        style={styles.favoriteIconBtn}
+                        onPress={(event) => {
+                          event.stopPropagation();
+                          void onToggleFavoriteTask(task.id);
+                        }}>
+                        <Ionicons
+                          name={favorite ? 'star' : 'star-outline'}
+                          size={16}
+                          color={favorite ? colors.warning : colors.textMuted}
+                        />
+                      </TouchableOpacity>
                       <View style={[styles.priorityBadge, { backgroundColor: tone.bg }]}>
                         <Text style={[styles.priorityText, { color: tone.color }]}>{tone.label}</Text>
                       </View>
@@ -529,7 +667,8 @@ export default function HomeDashboardScreen() {
                 onActionPress={() => router.push('/resources')}
               />
             ) : (
-              latestResources.map((resource) => {
+              prioritizedResources.map((resource) => {
+                const favorite = favoriteResourceIds.includes(resource.id);
                 return (
                   <TouchableOpacity
                     key={resource.id}
@@ -540,6 +679,18 @@ export default function HomeDashboardScreen() {
                       <Text style={styles.resourceTitle}>{resource.title}</Text>
                       <Text style={styles.resourceMeta}>{formatDateLabel(resource.created_at, locale, t('common.noDate'))}</Text>
                     </View>
+                    <TouchableOpacity
+                      style={styles.favoriteIconBtn}
+                      onPress={(event) => {
+                        event.stopPropagation();
+                        void onToggleFavoriteResource(resource.id);
+                      }}>
+                      <Ionicons
+                        name={favorite ? 'star' : 'star-outline'}
+                        size={16}
+                        color={favorite ? colors.warning : colors.textMuted}
+                      />
+                    </TouchableOpacity>
                     <Ionicons name="chevron-forward" size={16} color={colors.textMuted} />
                   </TouchableOpacity>
                 );
@@ -619,6 +770,31 @@ export default function HomeDashboardScreen() {
           </Animated.View>
         </TouchableOpacity>
       </Animated.View>
+
+      <Modal visible={tourVisible} transparent animationType="fade" onRequestClose={() => void closeTour()}>
+        <Pressable style={styles.tourOverlay} onPress={() => void closeTour()}>
+          <Pressable style={styles.tourCard} onPress={(event) => event.stopPropagation()}>
+            <Text style={styles.tourTitle}>{t('home.tourTitle')}</Text>
+            <View style={styles.tourList}>
+              <View style={styles.tourItemRow}>
+                <Ionicons name="add-circle-outline" size={16} color={colors.primary} />
+                <Text style={styles.tourText}>{t('home.tourItemOne')}</Text>
+              </View>
+              <View style={styles.tourItemRow}>
+                <Ionicons name="swap-horizontal-outline" size={16} color={colors.primary} />
+                <Text style={styles.tourText}>{t('home.tourItemTwo')}</Text>
+              </View>
+              <View style={styles.tourItemRow}>
+                <Ionicons name="notifications-outline" size={16} color={colors.primary} />
+                <Text style={styles.tourText}>{t('home.tourItemThree')}</Text>
+              </View>
+            </View>
+            <TouchableOpacity style={styles.tourBtn} onPress={() => void closeTour()}>
+              <Text style={styles.tourBtnText}>{t('home.tourButton')}</Text>
+            </TouchableOpacity>
+          </Pressable>
+        </Pressable>
+      </Modal>
     </View>
     </TabSwipeShell>
   );
@@ -676,6 +852,7 @@ const createStyles = (
     borderRadius: 23,
     alignItems: 'center',
     justifyContent: 'center',
+    position: 'relative',
   },
   avatarPulseRing: {
     position: 'absolute',
@@ -717,6 +894,15 @@ const createStyles = (
     color: colors.primary,
     fontSize: 14,
     fontWeight: '800',
+  },
+  avatarStatusDot: {
+    position: 'absolute',
+    right: -1,
+    bottom: -1,
+    width: 12,
+    height: 12,
+    borderRadius: 6,
+    borderWidth: 2,
   },
   notificationButton: {
     width: 44,
@@ -823,6 +1009,13 @@ const createStyles = (
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
+  },
+  favoriteIconBtn: {
+    width: 28,
+    height: 28,
+    borderRadius: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   taskTitle: {
     fontWeight: '700',
@@ -977,5 +1170,53 @@ const createStyles = (
   fabMenuText: {
     color: colors.text,
     fontWeight: '700',
+  },
+  tourOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(2,6,23,0.45)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 16,
+  },
+  tourCard: {
+    width: '100%',
+    maxWidth: 360,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.surface,
+    paddingHorizontal: 14,
+    paddingVertical: 14,
+  },
+  tourTitle: {
+    color: colors.text,
+    fontSize: 18,
+    fontWeight: '800',
+    marginBottom: 10,
+  },
+  tourList: {
+    gap: 10,
+    marginBottom: 14,
+  },
+  tourItemRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 8,
+  },
+  tourText: {
+    flex: 1,
+    color: colors.textMuted,
+    lineHeight: 18,
+  },
+  tourBtn: {
+    borderRadius: 12,
+    backgroundColor: colors.primary,
+    minHeight: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  tourBtnText: {
+    color: '#FFFFFF',
+    fontWeight: '800',
   },
 });

@@ -21,7 +21,7 @@ import { useI18n } from '@/hooks/use-i18n';
 import { getErrorMessage } from '@/lib/errors';
 import { formatDateLabel } from '@/lib/format';
 import type { ThemeMode } from '@/lib/settings-storage';
-import { fetchTaskStats, getCachedTaskStats } from '@/lib/student-api';
+import { fetchTaskStats, fetchTasks, getCachedTaskStats, getCachedTasks } from '@/lib/student-api';
 import { useAuth } from '@/providers/auth-provider';
 import { useSettings } from '@/providers/settings-provider';
 
@@ -94,6 +94,24 @@ function ActivityRing({
   );
 }
 
+function toIsoDateOnly(value: Date): string {
+  return value.toISOString().slice(0, 10);
+}
+
+function computeStreakDays(doneDateIsoSet: Set<string>): number {
+  let streak = 0;
+  const cursor = new Date();
+
+  while (true) {
+    const dayKey = toIsoDateOnly(cursor);
+    if (!doneDateIsoSet.has(dayKey)) break;
+    streak += 1;
+    cursor.setDate(cursor.getDate() - 1);
+  }
+
+  return streak;
+}
+
 function SettingChip({
   label,
   active,
@@ -128,6 +146,8 @@ export default function ProfileScreen() {
   const [loading, setLoading] = useState(true);
   const [totalTasks, setTotalTasks] = useState(0);
   const [doneTasks, setDoneTasks] = useState(0);
+  const [weekDoneTasks, setWeekDoneTasks] = useState(0);
+  const [streakDays, setStreakDays] = useState(0);
   const [statsError, setStatsError] = useState('');
   const [preferencesOpen, setPreferencesOpen] = useState(false);
   const [securityOpen, setSecurityOpen] = useState(false);
@@ -136,6 +156,7 @@ export default function ProfileScreen() {
     || (typeof user?.user_metadata?.avatar_url === 'string' ? user.user_metadata.avatar_url.trim() : '');
   const completionRate = totalTasks > 0 ? doneTasks / totalTasks : 0;
   const pendingTasks = Math.max(totalTasks - doneTasks, 0);
+  const weeklyGoal = 5;
 
   const themedStyles = useMemo(() => createStyles(colors, cardShadow), [cardShadow, colors]);
 
@@ -152,14 +173,55 @@ export default function ProfileScreen() {
       setLoading(true);
       setStatsError('');
 
-      const cached = await getCachedTaskStats(user.id);
-      setTotalTasks(cached.total);
-      setDoneTasks(cached.done);
+      const [cachedStats, cachedTasks] = await Promise.all([
+        getCachedTaskStats(user.id),
+        getCachedTasks(user.id),
+      ]);
+      setTotalTasks(cachedStats.total);
+      setDoneTasks(cachedStats.done);
+
+      const weekStart = new Date();
+      weekStart.setHours(0, 0, 0, 0);
+      weekStart.setDate(weekStart.getDate() - 6);
+      const weekStartMs = weekStart.getTime();
+
+      const cachedDoneDates = new Set(
+        cachedTasks
+          .filter((task) => task.status === 'done' && task.completed_at)
+          .map((task) => (task.completed_at as string).slice(0, 10))
+      );
+      const cachedWeekDone = cachedTasks.filter((task) => {
+        if (!task.completed_at) return false;
+        const completedAtMs = Date.parse(task.completed_at);
+        if (Number.isNaN(completedAtMs)) return false;
+        return completedAtMs >= weekStartMs;
+      }).length;
+
+      setWeekDoneTasks(cachedWeekDone);
+      setStreakDays(computeStreakDays(cachedDoneDates));
       setLoading(false);
 
-      const stats = await fetchTaskStats(user.id);
+      const [stats, remoteTasks] = await Promise.all([
+        fetchTaskStats(user.id),
+        fetchTasks(user.id),
+      ]);
       setTotalTasks(stats.total);
       setDoneTasks(stats.done);
+
+      const remoteDoneDates = new Set(
+        remoteTasks
+          .filter((task) => task.status === 'done' && task.completed_at)
+          .map((task) => (task.completed_at as string).slice(0, 10))
+      );
+      const remoteWeekDone = remoteTasks.filter((task) => {
+        if (!task.completed_at) return false;
+        const completedAtMs = Date.parse(task.completed_at);
+        if (Number.isNaN(completedAtMs)) return false;
+        return completedAtMs >= weekStartMs;
+      }).length;
+
+      setWeekDoneTasks(remoteWeekDone);
+      setStreakDays(computeStreakDays(remoteDoneDates));
     } catch (error) {
       setStatsError(getErrorMessage(error, t('profile.statsError')));
     } finally {
@@ -239,6 +301,18 @@ export default function ProfileScreen() {
                 <View style={themedStyles.activityLegendItem}>
                   <Text style={themedStyles.activityLegendValue}>{totalTasks}</Text>
                   <Text style={themedStyles.activityLegendLabel}>{t('profile.totalTasksLabel')}</Text>
+                </View>
+              </View>
+
+              <View style={themedStyles.kpiRow}>
+                <View style={themedStyles.kpiCard}>
+                  <Text style={themedStyles.kpiTitle}>{t('profile.streakTitle')}</Text>
+                  <Text style={themedStyles.kpiValue}>{t('profile.streakValue', { count: streakDays })}</Text>
+                </View>
+
+                <View style={themedStyles.kpiCard}>
+                  <Text style={themedStyles.kpiTitle}>{t('profile.weekGoalTitle')}</Text>
+                  <Text style={themedStyles.kpiValue}>{t('profile.weekGoalValue', { done: weekDoneTasks, goal: weeklyGoal })}</Text>
                 </View>
               </View>
 
@@ -456,6 +530,31 @@ const createStyles = (
       color: colors.textMuted,
       fontSize: 11,
       textAlign: 'center',
+    },
+    kpiRow: {
+      flexDirection: 'row',
+      gap: 8,
+      marginBottom: 12,
+    },
+    kpiCard: {
+      flex: 1,
+      borderRadius: 10,
+      borderWidth: 1,
+      borderColor: colors.border,
+      backgroundColor: colors.background,
+      paddingHorizontal: 10,
+      paddingVertical: 9,
+      gap: 4,
+    },
+    kpiTitle: {
+      color: colors.textMuted,
+      fontSize: 11,
+      fontWeight: '600',
+    },
+    kpiValue: {
+      color: colors.text,
+      fontSize: 13,
+      fontWeight: '800',
     },
     metaRow: {
       flexDirection: 'row',

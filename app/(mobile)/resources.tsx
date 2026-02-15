@@ -2,7 +2,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
 import { router } from 'expo-router';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Alert, Linking, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { Alert, Linking, RefreshControl, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import Swipeable from 'react-native-gesture-handler/Swipeable';
 
 import { ResourceFileIcon } from '@/components/ui/resource-file-icon';
@@ -14,10 +14,12 @@ import { getErrorMessage } from '@/lib/errors';
 import { formatDateLabel } from '@/lib/format';
 import { getResourceExternalUrl } from '@/lib/resource-open';
 import { deleteResource, fetchResources, getCachedResources } from '@/lib/student-api';
+import { getUserPreferences, toggleFavoriteResource } from '@/lib/user-preferences';
 import { useAuth } from '@/providers/auth-provider';
 import type { Resource } from '@/types/supabase';
 
 type ResourceFilter = 'tout' | 'note' | 'link' | 'file';
+type ResourceSortMode = 'recent' | 'oldest' | 'type' | 'favorites';
 
 function SwipeAction({ label, color }: { label: string; color: string }) {
   return (
@@ -34,9 +36,16 @@ export default function ResourcesScreen() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [filter, setFilter] = useState<ResourceFilter>('tout');
+  const [sortMode, setSortMode] = useState<ResourceSortMode>('recent');
   const [query, setQuery] = useState('');
   const [resources, setResources] = useState<Resource[]>([]);
+  const [favoriteResourceIds, setFavoriteResourceIds] = useState<string[]>([]);
+  const [refreshing, setRefreshing] = useState(false);
   const [selectedResourceIds, setSelectedResourceIds] = useState<string[]>([]);
+  const [pendingSwipeDelete, setPendingSwipeDelete] = useState<{
+    resource: Resource;
+    timeoutId: ReturnType<typeof setTimeout>;
+  } | null>(null);
 
   const styles = useMemo(() => createStyles(colors, cardShadow), [cardShadow, colors]);
 
@@ -68,11 +77,27 @@ export default function ResourcesScreen() {
     }
   }, [t, user?.id]);
 
+  const loadPreferences = useCallback(async () => {
+    if (!user?.id) return;
+    const preferences = await getUserPreferences(user.id);
+    setFavoriteResourceIds(preferences.favoriteResourceIds);
+  }, [user?.id]);
+
   useFocusEffect(
     useCallback(() => {
       void loadResources();
-    }, [loadResources])
+      void loadPreferences();
+    }, [loadPreferences, loadResources])
   );
+
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true);
+    try {
+      await Promise.all([loadResources(), loadPreferences()]);
+    } finally {
+      setRefreshing(false);
+    }
+  }, [loadPreferences, loadResources]);
 
   useEffect(() => {
     setSelectedResourceIds((prev) => prev.filter((resourceId) => resources.some((resource) => resource.id === resourceId)));
@@ -90,8 +115,25 @@ export default function ResourcesScreen() {
       data = data.filter((resource) => resource.title.toLowerCase().includes(normalized));
     }
 
+    if (sortMode === 'oldest') {
+      data.sort((a, b) => (a.created_at ?? '').localeCompare(b.created_at ?? ''));
+      return data;
+    }
+
+    if (sortMode === 'type') {
+      data.sort((a, b) => (a.type ?? '').localeCompare(b.type ?? '') || a.title.localeCompare(b.title));
+      return data;
+    }
+
+    if (sortMode === 'favorites') {
+      data = data.filter((resource) => favoriteResourceIds.includes(resource.id));
+      data.sort((a, b) => (b.created_at ?? '').localeCompare(a.created_at ?? ''));
+      return data;
+    }
+
+    data.sort((a, b) => (b.created_at ?? '').localeCompare(a.created_at ?? ''));
     return data;
-  }, [filter, query, resources]);
+  }, [favoriteResourceIds, filter, query, resources, sortMode]);
 
   const effectiveState = loading ? 'loading' : error ? 'error' : resources.length === 0 ? 'empty' : 'auto';
   const isSelectionMode = selectedResourceIds.length > 0;
@@ -126,6 +168,59 @@ export default function ResourcesScreen() {
     }
   };
 
+  useEffect(() => {
+    return () => {
+      if (pendingSwipeDelete) {
+        clearTimeout(pendingSwipeDelete.timeoutId);
+      }
+    };
+  }, [pendingSwipeDelete]);
+
+  const commitResourceDelete = useCallback(
+    async (resourceId: string) => {
+      if (!user?.id) return;
+      try {
+        await deleteResource(resourceId, user.id);
+      } catch {
+        void loadResources();
+        Alert.alert(t('common.networkErrorTitle'), t('resources.deleteError'));
+      }
+    },
+    [loadResources, t, user?.id]
+  );
+
+  const scheduleSwipeDeleteResource = useCallback(
+    (resource: Resource) => {
+      if (!user?.id) return;
+
+      if (pendingSwipeDelete) {
+        clearTimeout(pendingSwipeDelete.timeoutId);
+        void commitResourceDelete(pendingSwipeDelete.resource.id);
+      }
+
+      setResources((prev) => prev.filter((row) => row.id !== resource.id));
+      setSelectedResourceIds((prev) => prev.filter((id) => id !== resource.id));
+
+      const timeoutId = setTimeout(() => {
+        void commitResourceDelete(resource.id);
+        setPendingSwipeDelete((current) => (current?.resource.id === resource.id ? null : current));
+      }, 3600);
+
+      setPendingSwipeDelete({ resource, timeoutId });
+    },
+    [commitResourceDelete, pendingSwipeDelete, user?.id]
+  );
+
+  const undoSwipeDelete = () => {
+    if (!pendingSwipeDelete) return;
+    clearTimeout(pendingSwipeDelete.timeoutId);
+    setResources((prev) => {
+      if (prev.some((resource) => resource.id === pendingSwipeDelete.resource.id)) return prev;
+      return [pendingSwipeDelete.resource, ...prev];
+    });
+    setPendingSwipeDelete(null);
+  };
+
   const openExternalLink = async (url: string) => {
     try {
       await Linking.openURL(url);
@@ -141,17 +236,41 @@ export default function ResourcesScreen() {
     router.push(`/resource-editor?resourceId=${resourceId}`);
   };
 
+  const onToggleFavoriteResource = async (resourceId: string) => {
+    if (!user?.id) return;
+    const previous = favoriteResourceIds;
+    const next = previous.includes(resourceId)
+      ? previous.filter((id) => id !== resourceId)
+      : [resourceId, ...previous];
+    setFavoriteResourceIds(next);
+    try {
+      const updated = await toggleFavoriteResource(user.id, resourceId);
+      setFavoriteResourceIds(updated.favoriteResourceIds);
+    } catch {
+      setFavoriteResourceIds(previous);
+    }
+  };
+
   const filterLabels: { key: ResourceFilter; label: string }[] = [
     { key: 'tout', label: t('resources.filterAll') },
     { key: 'note', label: t('resources.filterNote') },
     { key: 'link', label: t('resources.filterLink') },
     { key: 'file', label: t('resources.filterFile') },
   ];
+  const sortLabels: { key: ResourceSortMode; label: string }[] = [
+    { key: 'recent', label: t('resources.sortRecent') },
+    { key: 'oldest', label: t('resources.sortOldest') },
+    { key: 'type', label: t('resources.sortType') },
+    { key: 'favorites', label: t('resources.sortFavorites') },
+  ];
 
   return (
     <TabSwipeShell tab="resources">
     <View style={styles.page}>
-      <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+      <ScrollView
+        contentContainerStyle={styles.content}
+        showsVerticalScrollIndicator={false}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => void onRefresh()} tintColor={colors.primary} />}>
         <View style={styles.header}>
           <Text style={styles.title}>{t('resources.title')}</Text>
           <TouchableOpacity style={styles.addBtn} onPress={() => router.push('/resource-editor')}>
@@ -177,6 +296,17 @@ export default function ResourcesScreen() {
               style={[styles.filterChip, filter === item.key && styles.filterChipActive]}
               onPress={() => setFilter(item.key)}>
               <Text style={[styles.filterText, filter === item.key && styles.filterTextActive]}>{item.label}</Text>
+            </TouchableOpacity>
+          ))}
+        </ScrollView>
+
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filtersRow}>
+          {sortLabels.map((item) => (
+            <TouchableOpacity
+              key={item.key}
+              style={[styles.filterChip, sortMode === item.key && styles.filterChipActive]}
+              onPress={() => setSortMode(item.key)}>
+              <Text style={[styles.filterText, sortMode === item.key && styles.filterTextActive]}>{item.label}</Text>
             </TouchableOpacity>
           ))}
         </ScrollView>
@@ -250,6 +380,7 @@ export default function ResourcesScreen() {
               filtered.map((resource) => {
                 const selected = selectedResourceIds.includes(resource.id);
                 const linkUrl = resource.type === 'link' ? getResourceExternalUrl(resource) : null;
+                const favorite = favoriteResourceIds.includes(resource.id);
 
                 const card = (
                   <TouchableOpacity
@@ -276,7 +407,20 @@ export default function ResourcesScreen() {
                     <ResourceFileIcon resource={resource} size={36} style={styles.iconWrap} />
 
                     <View style={styles.cardMain}>
-                      <Text style={styles.resourceTitle}>{resource.title}</Text>
+                      <View style={styles.titleRow}>
+                        <Text style={styles.resourceTitle}>{resource.title}</Text>
+                        {!isSelectionMode ? (
+                          <TouchableOpacity
+                            style={styles.favoriteBtn}
+                            onPress={() => void onToggleFavoriteResource(resource.id)}>
+                            <Ionicons
+                              name={favorite ? 'star' : 'star-outline'}
+                              size={16}
+                              color={favorite ? colors.warning : colors.textMuted}
+                            />
+                          </TouchableOpacity>
+                        ) : null}
+                      </View>
                       <Text style={styles.resourceMeta}>
                         {t('resources.addedOn', {
                           date: formatDateLabel(resource.created_at, locale, t('common.noDate')),
@@ -316,7 +460,7 @@ export default function ResourcesScreen() {
                     renderLeftActions={() => <SwipeAction label={t('resources.edit')} color={colors.success} />}
                     onSwipeableLeftOpen={() => router.push(`/resource-editor?resourceId=${resource.id}`)}
                     renderRightActions={() => <SwipeAction label={t('resources.delete')} color={colors.danger} />}
-                    onSwipeableRightOpen={() => void removeResources([resource.id])}>
+                    onSwipeableRightOpen={() => scheduleSwipeDeleteResource(resource)}>
                     {card}
                   </Swipeable>
                 );
@@ -325,6 +469,15 @@ export default function ResourcesScreen() {
           </View>
         ) : null}
       </ScrollView>
+
+      {pendingSwipeDelete ? (
+        <View style={styles.undoBar}>
+          <Text style={styles.undoText}>{t('resources.undoDeleteMessage')}</Text>
+          <TouchableOpacity style={styles.undoBtn} onPress={undoSwipeDelete}>
+            <Text style={styles.undoBtnText}>{t('common.undo')}</Text>
+          </TouchableOpacity>
+        </View>
+      ) : null}
     </View>
     </TabSwipeShell>
   );
@@ -510,10 +663,25 @@ const createStyles = (
     cardMain: {
       flex: 1,
     },
+    titleRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      gap: 8,
+    },
     resourceTitle: {
+      flex: 1,
       color: colors.text,
       fontWeight: '700',
       marginBottom: 4,
+    },
+    favoriteBtn: {
+      width: 28,
+      height: 28,
+      borderRadius: 8,
+      alignItems: 'center',
+      justifyContent: 'center',
+      marginTop: -2,
     },
     resourceMeta: {
       color: colors.textMuted,
@@ -547,5 +715,41 @@ const createStyles = (
       color: colors.primary,
       fontSize: 11,
       fontWeight: '600',
+    },
+    undoBar: {
+      position: 'absolute',
+      left: 14,
+      right: 14,
+      bottom: 18,
+      borderRadius: 12,
+      borderWidth: 1,
+      borderColor: colors.border,
+      backgroundColor: colors.surface,
+      paddingHorizontal: 12,
+      paddingVertical: 10,
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      gap: 10,
+      ...cardShadow,
+    },
+    undoText: {
+      flex: 1,
+      color: colors.text,
+      fontWeight: '600',
+      fontSize: 13,
+    },
+    undoBtn: {
+      borderRadius: 999,
+      paddingHorizontal: 12,
+      paddingVertical: 7,
+      backgroundColor: colors.primarySoft,
+      borderWidth: 1,
+      borderColor: colors.primary,
+    },
+    undoBtnText: {
+      color: colors.primary,
+      fontWeight: '800',
+      fontSize: 12,
     },
   });

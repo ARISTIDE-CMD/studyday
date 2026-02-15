@@ -24,6 +24,7 @@ const FILE_PATH = FileSystem.documentDirectory
   ? `${FileSystem.documentDirectory}${STORAGE_KEY}.json`
   : null;
 const MAX_NOTIFICATIONS_PER_USER = 120;
+const MAX_NOTIFICATION_AGE_MS = 30 * 24 * 60 * 60 * 1000;
 
 const defaultState: ActivityNotificationsState = {
   notificationsByUser: {},
@@ -150,10 +151,22 @@ function sortNotifications(items: ActivityNotificationItem[]): ActivityNotificat
   return [...items].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
 }
 
+function pruneNotifications(items: ActivityNotificationItem[]): ActivityNotificationItem[] {
+  const now = Date.now();
+  const filtered = items.filter((item) => {
+    const createdAtMs = Date.parse(item.createdAt);
+    if (Number.isNaN(createdAtMs)) return false;
+    return now - createdAtMs <= MAX_NOTIFICATION_AGE_MS;
+  });
+  return sortNotifications(filtered).slice(0, MAX_NOTIFICATIONS_PER_USER);
+}
+
 export async function getActivityNotifications(userId: string): Promise<ActivityNotificationItem[]> {
-  const state = await loadState();
-  const list = state.notificationsByUser[userId] ?? [];
-  return sortNotifications(list);
+  const nextState = await updateState((state) => {
+    const list = state.notificationsByUser[userId] ?? [];
+    state.notificationsByUser[userId] = pruneNotifications(list);
+  });
+  return nextState.notificationsByUser[userId] ?? [];
 }
 
 export async function addActivityNotification(input: {
@@ -177,7 +190,7 @@ export async function addActivityNotification(input: {
 
   await updateState((state) => {
     const current = state.notificationsByUser[input.userId] ?? [];
-    const next = [item, ...current].slice(0, MAX_NOTIFICATIONS_PER_USER);
+    const next = pruneNotifications([item, ...current]);
     state.notificationsByUser[input.userId] = next;
   });
 
@@ -187,7 +200,7 @@ export async function addActivityNotification(input: {
 export async function markAllActivityNotificationsAsRead(userId: string): Promise<ActivityNotificationItem[]> {
   const now = new Date().toISOString();
   const nextState = await updateState((state) => {
-    const list = state.notificationsByUser[userId] ?? [];
+    const list = pruneNotifications(state.notificationsByUser[userId] ?? []);
     state.notificationsByUser[userId] = list.map((item) => (item.readAt ? item : { ...item, readAt: now }));
   });
   return sortNotifications(nextState.notificationsByUser[userId] ?? []);
@@ -199,11 +212,10 @@ export async function markActivityNotificationAsRead(
 ): Promise<ActivityNotificationItem[]> {
   const now = new Date().toISOString();
   const nextState = await updateState((state) => {
-    const list = state.notificationsByUser[userId] ?? [];
+    const list = pruneNotifications(state.notificationsByUser[userId] ?? []);
     state.notificationsByUser[userId] = list.map((item) =>
       item.id === notificationId && !item.readAt ? { ...item, readAt: now } : item
     );
   });
   return sortNotifications(nextState.notificationsByUser[userId] ?? []);
 }
-
