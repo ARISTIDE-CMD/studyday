@@ -32,14 +32,39 @@ function RootNavigator() {
 
   return (
     <ThemeProvider value={navigationTheme}>
-      <Stack screenOptions={{ headerShown: false }}>
+      <Stack
+        screenOptions={{
+          headerShown: false,
+          contentStyle: { backgroundColor: colors.background },
+        }}>
         <Stack.Screen name="index" />
         <Stack.Screen name="(auth)" />
         <Stack.Screen name="(mobile)" />
         <Stack.Screen name="post-login" />
-        <Stack.Screen name="task-editor" options={{ presentation: 'modal' }} />
-        <Stack.Screen name="resource-editor" options={{ presentation: 'modal' }} />
-        <Stack.Screen name="profile-editor" options={{ presentation: 'modal' }} />
+        <Stack.Screen
+          name="task-editor"
+          options={{
+            presentation: 'fullScreenModal',
+            animation: 'slide_from_bottom',
+            contentStyle: { backgroundColor: colors.background },
+          }}
+        />
+        <Stack.Screen
+          name="resource-editor"
+          options={{
+            presentation: 'fullScreenModal',
+            animation: 'slide_from_bottom',
+            contentStyle: { backgroundColor: colors.background },
+          }}
+        />
+        <Stack.Screen
+          name="profile-editor"
+          options={{
+            presentation: 'fullScreenModal',
+            animation: 'slide_from_bottom',
+            contentStyle: { backgroundColor: colors.background },
+          }}
+        />
         <Stack.Screen name="task/[id]" />
         <Stack.Screen name="resource/[id]" />
         <Stack.Screen name="announcement/[id]" />

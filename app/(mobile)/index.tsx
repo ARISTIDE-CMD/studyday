@@ -2,8 +2,8 @@ import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
 import { Image } from 'expo-image';
 import { router } from 'expo-router';
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { ActivityIndicator, Animated, Easing, Pressable, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 
 import { ResourceFileIcon } from '@/components/ui/resource-file-icon';
 import { StateBlock } from '@/components/ui/state-block';
@@ -28,6 +28,12 @@ export default function HomeDashboardScreen() {
   const [latestAnnouncement, setLatestAnnouncement] = useState<Announcement | null>(null);
   const [avatarImageError, setAvatarImageError] = useState(false);
   const [fabMenuOpen, setFabMenuOpen] = useState(false);
+  const [fabMenuVisible, setFabMenuVisible] = useState(false);
+  const avatarPulse = useRef(new Animated.Value(0)).current;
+  const dayCardBreath = useRef(new Animated.Value(0)).current;
+  const fabFloat = useRef(new Animated.Value(0)).current;
+  const fabMenuProgress = useRef(new Animated.Value(0)).current;
+  const fabPressBump = useRef(new Animated.Value(0)).current;
 
   const displayName = useMemo(() => {
     const fromProfile = profile?.full_name?.trim();
@@ -79,6 +85,96 @@ export default function HomeDashboardScreen() {
     setAvatarImageError(false);
   }, [avatarUrl]);
 
+  useEffect(() => {
+    const avatarLoop = Animated.loop(
+      Animated.timing(avatarPulse, {
+        toValue: 1,
+        duration: 2200,
+        easing: Easing.out(Easing.quad),
+        useNativeDriver: true,
+      })
+    );
+    avatarLoop.start();
+
+    return () => {
+      avatarLoop.stop();
+      avatarPulse.stopAnimation();
+    };
+  }, [avatarPulse]);
+
+  useEffect(() => {
+    const cardLoop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(dayCardBreath, {
+          toValue: 1,
+          duration: 3200,
+          easing: Easing.inOut(Easing.sin),
+          useNativeDriver: true,
+        }),
+        Animated.timing(dayCardBreath, {
+          toValue: 0,
+          duration: 3200,
+          easing: Easing.inOut(Easing.sin),
+          useNativeDriver: true,
+        }),
+      ])
+    );
+    cardLoop.start();
+
+    return () => {
+      cardLoop.stop();
+      dayCardBreath.stopAnimation();
+    };
+  }, [dayCardBreath]);
+
+  useEffect(() => {
+    const fabLoop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(fabFloat, {
+          toValue: 1,
+          duration: 2200,
+          easing: Easing.inOut(Easing.sin),
+          useNativeDriver: true,
+        }),
+        Animated.timing(fabFloat, {
+          toValue: 0,
+          duration: 2200,
+          easing: Easing.inOut(Easing.sin),
+          useNativeDriver: true,
+        }),
+      ])
+    );
+    fabLoop.start();
+
+    return () => {
+      fabLoop.stop();
+      fabFloat.stopAnimation();
+    };
+  }, [fabFloat]);
+
+  useEffect(() => {
+    if (fabMenuOpen) {
+      setFabMenuVisible(true);
+      Animated.spring(fabMenuProgress, {
+        toValue: 1,
+        damping: 14,
+        stiffness: 180,
+        mass: 0.9,
+        useNativeDriver: true,
+      }).start();
+      return;
+    }
+
+    Animated.timing(fabMenuProgress, {
+      toValue: 0,
+      duration: 190,
+      easing: Easing.out(Easing.cubic),
+      useNativeDriver: true,
+    }).start(({ finished }) => {
+      if (finished) setFabMenuVisible(false);
+    });
+  }, [fabMenuOpen, fabMenuProgress]);
+
   const applySummary = useCallback((summary: Awaited<ReturnType<typeof fetchDashboardSummary>>) => {
     setTodoCount(summary.todoCount);
     setOverdueCount(summary.overdueCount);
@@ -121,6 +217,180 @@ export default function HomeDashboardScreen() {
     }, [loadData])
   );
 
+  const avatarPulseStyle = useMemo(
+    () => ({
+      opacity: avatarPulse.interpolate({
+        inputRange: [0, 1],
+        outputRange: [0.35, 0],
+      }),
+      transform: [
+        {
+          scale: avatarPulse.interpolate({
+            inputRange: [0, 1],
+            outputRange: [1, 1.23],
+          }),
+        },
+      ],
+    }),
+    [avatarPulse]
+  );
+
+  const dayCardAnimatedStyle = useMemo(
+    () => ({
+      transform: [
+        {
+          translateY: dayCardBreath.interpolate({
+            inputRange: [0, 1],
+            outputRange: [0, -2],
+          }),
+        },
+        {
+          scale: dayCardBreath.interpolate({
+            inputRange: [0, 1],
+            outputRange: [1, 1.008],
+          }),
+        },
+      ],
+    }),
+    [dayCardBreath]
+  );
+
+  const fabAnimatedStyle = useMemo(
+    () => ({
+      transform: [
+        {
+          translateY: fabFloat.interpolate({
+            inputRange: [0, 1],
+            outputRange: [0, -3],
+          }),
+        },
+      ],
+    }),
+    [fabFloat]
+  );
+
+  const fabToggleStyle = useMemo(
+    () => ({
+      transform: [
+        {
+          scale: fabPressBump.interpolate({
+            inputRange: [0, 1],
+            outputRange: [1, 0.92],
+          }),
+        },
+      ],
+    }),
+    [fabPressBump]
+  );
+
+  const fabIconStyle = useMemo(
+    () => ({
+      transform: [
+        {
+          rotate: fabMenuProgress.interpolate({
+            inputRange: [0, 1],
+            outputRange: ['0deg', '45deg'],
+          }),
+        },
+      ],
+    }),
+    [fabMenuProgress]
+  );
+
+  const fabBackdropStyle = useMemo(
+    () => ({
+      opacity: fabMenuProgress.interpolate({
+        inputRange: [0, 1],
+        outputRange: [0, 0.2],
+      }),
+    }),
+    [fabMenuProgress]
+  );
+
+  const fabMenuContainerStyle = useMemo(
+    () => ({
+      opacity: fabMenuProgress.interpolate({
+        inputRange: [0, 1],
+        outputRange: [0, 1],
+      }),
+      transform: [
+        {
+          translateY: fabMenuProgress.interpolate({
+            inputRange: [0, 1],
+            outputRange: [14, 0],
+          }),
+        },
+      ],
+    }),
+    [fabMenuProgress]
+  );
+
+  const firstMenuItemStyle = useMemo(
+    () => ({
+      opacity: fabMenuProgress.interpolate({
+        inputRange: [0, 0.55, 1],
+        outputRange: [0, 0, 1],
+      }),
+      transform: [
+        {
+          translateY: fabMenuProgress.interpolate({
+            inputRange: [0, 0.55, 1],
+            outputRange: [12, 8, 0],
+          }),
+        },
+        {
+          scale: fabMenuProgress.interpolate({
+            inputRange: [0, 0.55, 1],
+            outputRange: [0.96, 0.96, 1],
+          }),
+        },
+      ],
+    }),
+    [fabMenuProgress]
+  );
+
+  const secondMenuItemStyle = useMemo(
+    () => ({
+      opacity: fabMenuProgress.interpolate({
+        inputRange: [0, 0.35, 0.88, 1],
+        outputRange: [0, 0, 0.82, 1],
+      }),
+      transform: [
+        {
+          translateY: fabMenuProgress.interpolate({
+            inputRange: [0, 0.35, 1],
+            outputRange: [18, 10, 0],
+          }),
+        },
+        {
+          scale: fabMenuProgress.interpolate({
+            inputRange: [0, 0.35, 1],
+            outputRange: [0.94, 0.96, 1],
+          }),
+        },
+      ],
+    }),
+    [fabMenuProgress]
+  );
+
+  const toggleFabMenu = () => {
+    Animated.sequence([
+      Animated.timing(fabPressBump, {
+        toValue: 1,
+        duration: 90,
+        easing: Easing.out(Easing.quad),
+        useNativeDriver: true,
+      }),
+      Animated.timing(fabPressBump, {
+        toValue: 0,
+        duration: 110,
+        easing: Easing.out(Easing.quad),
+        useNativeDriver: true,
+      }),
+    ]).start();
+    setFabMenuOpen((prev) => !prev);
+  };
+
   return (
     <View style={styles.page}>
       <View style={styles.stickyHeader}>
@@ -132,6 +402,7 @@ export default function HomeDashboardScreen() {
 
           <View style={styles.headerActions}>
             <TouchableOpacity style={styles.avatarButton} onPress={() => router.push('/profile')}>
+              <Animated.View pointerEvents="none" style={[styles.avatarPulseRing, avatarPulseStyle]} />
               <View style={styles.avatarOuter}>
                 <View style={styles.avatarInner}>
                   {avatarUrl && !avatarImageError ? (
@@ -158,7 +429,7 @@ export default function HomeDashboardScreen() {
 
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
 
-        <View style={styles.dayCard}>
+        <Animated.View style={[styles.dayCard, dayCardAnimatedStyle]}>
           <Text style={styles.dayLabel}>{t('home.daySummary')}</Text>
           <Text style={styles.dayDate}>{humanNow(locale)}</Text>
           <View style={styles.statsRow}>
@@ -172,7 +443,7 @@ export default function HomeDashboardScreen() {
               <Text style={styles.statText}>{t('home.overdue')}</Text>
             </View>
           </View>
-        </View>
+        </Animated.View>
 
         {loading ? (
           <View style={styles.loaderWrap}>
@@ -191,7 +462,7 @@ export default function HomeDashboardScreen() {
         ) : null}
 
         {!loading && !error ? (
-          <>
+          <View style={styles.feedStack}>
             <View style={styles.sectionHeader}>
               <Text style={styles.sectionTitle}>{t('home.nextTasks')}</Text>
               <View style={styles.sectionLinksRow}>
@@ -285,39 +556,53 @@ export default function HomeDashboardScreen() {
                 description={t('home.noAnnouncementDescription')}
               />
             )}
-          </>
+          </View>
         ) : null}
       </ScrollView>
 
-      {fabMenuOpen ? <Pressable style={styles.fabBackdrop} onPress={() => setFabMenuOpen(false)} /> : null}
-
-      {fabMenuOpen ? (
-        <View style={styles.fabMenu}>
-          <TouchableOpacity
-            style={styles.fabMenuItem}
-            onPress={() => {
-              setFabMenuOpen(false);
-              router.push('/task-editor');
-            }}>
-            <Ionicons name="checkmark-circle-outline" size={16} color={colors.text} />
-            <Text style={styles.fabMenuText}>{t('home.quickAddTask')}</Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={styles.fabMenuItem}
-            onPress={() => {
-              setFabMenuOpen(false);
-              router.push('/resource-editor');
-            }}>
-            <Ionicons name="folder-open-outline" size={16} color={colors.text} />
-            <Text style={styles.fabMenuText}>{t('home.quickAddResource')}</Text>
-          </TouchableOpacity>
-        </View>
+      {fabMenuVisible ? (
+        <Animated.View style={[styles.fabBackdrop, fabBackdropStyle]} pointerEvents={fabMenuOpen ? 'auto' : 'none'}>
+          <Pressable style={styles.backdropTap} onPress={() => setFabMenuOpen(false)} />
+        </Animated.View>
       ) : null}
 
-      <TouchableOpacity style={styles.fab} onPress={() => setFabMenuOpen((prev) => !prev)}>
-        <Ionicons name={fabMenuOpen ? 'close' : 'add'} size={24} color="#FFFFFF" />
-      </TouchableOpacity>
+      {fabMenuVisible ? (
+        <Animated.View
+          style={[styles.fabMenu, fabMenuContainerStyle]}
+          pointerEvents={fabMenuOpen ? 'auto' : 'none'}>
+          <Animated.View style={firstMenuItemStyle}>
+            <TouchableOpacity
+              style={styles.fabMenuItem}
+              onPress={() => {
+                setFabMenuOpen(false);
+                router.push('/task-editor');
+              }}>
+              <Ionicons name="checkmark-circle-outline" size={16} color={colors.text} />
+              <Text style={styles.fabMenuText}>{t('home.quickAddTask')}</Text>
+            </TouchableOpacity>
+          </Animated.View>
+
+          <Animated.View style={secondMenuItemStyle}>
+            <TouchableOpacity
+              style={styles.fabMenuItem}
+              onPress={() => {
+                setFabMenuOpen(false);
+                router.push('/resource-editor');
+              }}>
+              <Ionicons name="folder-open-outline" size={16} color={colors.text} />
+              <Text style={styles.fabMenuText}>{t('home.quickAddResource')}</Text>
+            </TouchableOpacity>
+          </Animated.View>
+        </Animated.View>
+      ) : null}
+
+      <Animated.View style={[styles.fab, fabAnimatedStyle, fabToggleStyle]}>
+        <TouchableOpacity style={styles.fabTap} onPress={toggleFabMenu}>
+          <Animated.View style={fabIconStyle}>
+            <Ionicons name="add" size={24} color="#FFFFFF" />
+          </Animated.View>
+        </TouchableOpacity>
+      </Animated.View>
     </View>
   );
 }
@@ -367,6 +652,16 @@ const createStyles = (
     width: 46,
     height: 46,
     borderRadius: 23,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  avatarPulseRing: {
+    position: 'absolute',
+    width: 46,
+    height: 46,
+    borderRadius: 23,
+    borderWidth: 2,
+    borderColor: colors.primary,
   },
   avatarOuter: {
     width: '100%',
@@ -470,6 +765,9 @@ const createStyles = (
     alignItems: 'center',
     marginTop: 6,
     marginBottom: 2,
+  },
+  feedStack: {
+    gap: 10,
   },
   sectionTitle: {
     fontSize: 18,
@@ -615,13 +913,20 @@ const createStyles = (
     height: 56,
     borderRadius: 16,
     backgroundColor: colors.primary,
+    overflow: 'hidden',
+    ...cardShadow,
+  },
+  fabTap: {
+    flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    ...cardShadow,
   },
   fabBackdrop: {
     ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'transparent',
+    backgroundColor: '#0F172A',
+  },
+  backdropTap: {
+    ...StyleSheet.absoluteFillObject,
   },
   fabMenu: {
     position: 'absolute',

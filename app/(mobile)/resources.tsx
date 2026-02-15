@@ -2,7 +2,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
 import { router } from 'expo-router';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Alert, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { Alert, Linking, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import Swipeable from 'react-native-gesture-handler/Swipeable';
 
 import { ResourceFileIcon } from '@/components/ui/resource-file-icon';
@@ -11,6 +11,7 @@ import { useAppTheme } from '@/hooks/use-app-theme';
 import { useI18n } from '@/hooks/use-i18n';
 import { getErrorMessage } from '@/lib/errors';
 import { formatDateLabel } from '@/lib/format';
+import { getResourceExternalUrl } from '@/lib/resource-open';
 import { deleteResource, fetchResources, getCachedResources } from '@/lib/student-api';
 import { useAuth } from '@/providers/auth-provider';
 import type { Resource } from '@/types/supabase';
@@ -121,6 +122,14 @@ export default function ResourcesScreen() {
     } catch {
       setResources(previous);
       Alert.alert(t('common.networkErrorTitle'), t('resources.deleteError'));
+    }
+  };
+
+  const openExternalLink = async (url: string) => {
+    try {
+      await Linking.openURL(url);
+    } catch {
+      Alert.alert(t('common.genericError'), t('resourceDetail.openError'));
     }
   };
 
@@ -238,6 +247,7 @@ export default function ResourcesScreen() {
             ) : (
               filtered.map((resource) => {
                 const selected = selectedResourceIds.includes(resource.id);
+                const linkUrl = resource.type === 'link' ? getResourceExternalUrl(resource) : null;
 
                 const card = (
                   <TouchableOpacity
@@ -270,6 +280,21 @@ export default function ResourcesScreen() {
                           date: formatDateLabel(resource.created_at, locale, t('common.noDate')),
                         })}
                       </Text>
+                      {linkUrl ? (
+                        <TouchableOpacity
+                          style={styles.linkPreviewWrap}
+                          onPress={() => {
+                            if (isSelectionMode) {
+                              toggleSelection(resource.id);
+                              return;
+                            }
+                            void openExternalLink(linkUrl);
+                          }}>
+                          <Text style={styles.linkPreviewText} numberOfLines={1}>
+                            {linkUrl}
+                          </Text>
+                        </TouchableOpacity>
+                      ) : null}
                       <View style={styles.tagsRow}>
                         {(resource.tags ?? []).map((tag) => (
                           <View key={tag} style={styles.tag}>
@@ -491,6 +516,18 @@ const createStyles = (
       color: colors.textMuted,
       fontSize: 12,
       marginBottom: 6,
+    },
+    linkPreviewWrap: {
+      alignSelf: 'flex-start',
+      marginBottom: 8,
+      paddingVertical: 2,
+    },
+    linkPreviewText: {
+      color: colors.primary,
+      textDecorationLine: 'underline',
+      fontSize: 12,
+      fontWeight: '600',
+      maxWidth: '96%',
     },
     tagsRow: {
       flexDirection: 'row',

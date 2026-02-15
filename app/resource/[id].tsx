@@ -184,6 +184,11 @@ export default function ResourceDetailScreen() {
 
             <Text style={styles.sectionTitle}>{t('resourceDetail.content')}</Text>
             <Text style={styles.body}>{contentValue || t('resourceDetail.noContent')}</Text>
+            {resource.type === 'link' && externalUrl ? (
+              <TouchableOpacity style={styles.linkTextWrap} onPress={() => void onOpenExternal()}>
+                <Text style={styles.linkText}>{externalUrl}</Text>
+              </TouchableOpacity>
+            ) : null}
 
             {externalUrl ? (
               <View style={styles.actionRow}>
@@ -316,7 +321,16 @@ const createStyles = (colors: ReturnType<typeof useAppTheme>['colors']) =>
     body: {
       color: colors.text,
       lineHeight: 22,
-      marginBottom: 14,
+      marginBottom: 6,
+    },
+    linkTextWrap: {
+      alignSelf: 'flex-start',
+      marginBottom: 10,
+    },
+    linkText: {
+      color: colors.primary,
+      textDecorationLine: 'underline',
+      fontWeight: '600',
     },
     openButton: {
       borderRadius: 10,
