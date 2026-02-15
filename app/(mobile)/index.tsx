@@ -13,10 +13,12 @@ import { getErrorMessage } from '@/lib/errors';
 import { fetchDashboardSummary, getCachedDashboardSummary } from '@/lib/student-api';
 import { formatDateLabel, humanNow } from '@/lib/format';
 import { useAuth } from '@/providers/auth-provider';
+import { useInAppNotification } from '@/providers/notification-provider';
 import type { Announcement, Resource, Task } from '@/types/supabase';
 
 export default function HomeDashboardScreen() {
   const { user, profile } = useAuth();
+  const { unreadActivityCount } = useInAppNotification();
   const { colors, cardShadow } = useAppTheme();
   const { t, locale } = useI18n();
   const [loading, setLoading] = useState(true);
@@ -419,9 +421,11 @@ export default function HomeDashboardScreen() {
               </View>
             </TouchableOpacity>
 
-            <TouchableOpacity style={styles.notificationButton}>
+            <TouchableOpacity
+              style={styles.notificationButton}
+              onPress={() => router.push('/notifications-center')}>
               <Ionicons name="notifications-outline" size={22} color={colors.text} />
-              {latestAnnouncement?.is_important ? <View style={styles.notificationDot} /> : null}
+              {unreadActivityCount > 0 ? <View style={styles.notificationDot} /> : null}
             </TouchableOpacity>
           </View>
         </View>

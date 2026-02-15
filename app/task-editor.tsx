@@ -23,6 +23,7 @@ import { getErrorMessage } from '@/lib/errors';
 import { createTask, fetchTaskById, getCachedTaskById, updateTask } from '@/lib/student-api';
 import { formatDateLabel, toIsoDate } from '@/lib/format';
 import { useAuth } from '@/providers/auth-provider';
+import { useInAppNotification } from '@/providers/notification-provider';
 
 const priorities = ['low', 'medium', 'high'] as const;
 type Priority = (typeof priorities)[number];
@@ -75,6 +76,7 @@ function buildCalendarCells(monthDate: Date): CalendarCell[] {
 
 export default function TaskEditorScreen() {
   const { user } = useAuth();
+  const { addActivityNotification } = useInAppNotification();
   const { colors } = useAppTheme();
   const { t, locale } = useI18n();
   const { taskId } = useLocalSearchParams<{ taskId?: string }>();
@@ -174,7 +176,7 @@ export default function TaskEditorScreen() {
           is_persistent: isPersistent,
         });
       } else {
-        await createTask({
+        const createdTask = await createTask({
           userId: user.id,
           title: title.trim(),
           description,
@@ -182,6 +184,16 @@ export default function TaskEditorScreen() {
           priority,
           isPersistent,
         });
+        try {
+          await addActivityNotification({
+            entityType: 'task',
+            entityId: createdTask.id,
+            title: t('activityNotifications.taskCreatedTitle'),
+            message: t('activityNotifications.taskCreatedMessage', { title: createdTask.title }),
+          });
+        } catch {
+          // Keep local-first task creation behavior even if notification persistence fails.
+        }
       }
 
       setShowToast(true);

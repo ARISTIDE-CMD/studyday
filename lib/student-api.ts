@@ -324,6 +324,7 @@ export async function createTask(input: {
   });
 
   void trySyncSilently(input.userId);
+  return task;
 }
 
 export async function updateTask(taskId: string, userId: string, patch: Partial<Task>) {
@@ -461,6 +462,7 @@ export async function createResource(input: {
   });
 
   void trySyncSilently(input.userId);
+  return resource;
 }
 
 export async function updateResource(resourceId: string, userId: string, patch: Partial<Resource>) {

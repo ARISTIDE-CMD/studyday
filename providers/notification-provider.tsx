@@ -11,6 +11,15 @@ import { Animated, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useAppTheme } from '@/hooks/use-app-theme';
+import {
+  addActivityNotification as persistActivityNotification,
+  getActivityNotifications,
+  markActivityNotificationAsRead,
+  markAllActivityNotificationsAsRead,
+  type ActivityNotificationEntity,
+  type ActivityNotificationItem,
+} from '@/lib/activity-notifications';
+import { useAuth } from '@/providers/auth-provider';
 
 type NotificationVariant = 'info' | 'success' | 'warning';
 
@@ -28,11 +37,22 @@ type NotificationState = NotificationInput & {
 type NotificationContextValue = {
   showNotification: (input: NotificationInput) => void;
   dismissNotification: () => void;
+  activityNotifications: ActivityNotificationItem[];
+  unreadActivityCount: number;
+  addActivityNotification: (input: {
+    entityType: ActivityNotificationEntity;
+    entityId: string;
+    title: string;
+    message: string;
+  }) => Promise<void>;
+  markActivityAsRead: (notificationId: string) => Promise<void>;
+  markAllActivityAsRead: () => Promise<void>;
 };
 
 const NotificationContext = createContext<NotificationContextValue | undefined>(undefined);
 
 export function NotificationProvider({ children }: { children: React.ReactNode }) {
+  const { user } = useAuth();
   const insets = useSafeAreaInsets();
   const { colors, cardShadow, isDark } = useAppTheme();
   const translateY = useRef(new Animated.Value(-180)).current;
@@ -40,6 +60,28 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
   const idRef = useRef(0);
 
   const [activeNotification, setActiveNotification] = useState<NotificationState | null>(null);
+  const [activityNotifications, setActivityNotifications] = useState<ActivityNotificationItem[]>([]);
+
+  useEffect(() => {
+    let active = true;
+
+    const run = async () => {
+      if (!user?.id) {
+        if (active) setActivityNotifications([]);
+        return;
+      }
+      const data = await getActivityNotifications(user.id);
+      if (active) {
+        setActivityNotifications(data);
+      }
+    };
+
+    void run();
+
+    return () => {
+      active = false;
+    };
+  }, [user?.id]);
 
   const dismissNotification = useCallback(() => {
     if (hideTimerRef.current) {
@@ -60,6 +102,46 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
       setActiveNotification({ id: idRef.current, ...input });
     },
     []
+  );
+
+  const addActivityNotification = useCallback(
+    async (input: {
+      entityType: ActivityNotificationEntity;
+      entityId: string;
+      title: string;
+      message: string;
+    }) => {
+      if (!user?.id) return;
+      const item = await persistActivityNotification({
+        userId: user.id,
+        entityType: input.entityType,
+        entityId: input.entityId,
+        title: input.title,
+        message: input.message,
+      });
+      setActivityNotifications((prev) => [item, ...prev].slice(0, 120));
+    },
+    [user?.id]
+  );
+
+  const markAllActivityAsRead = useCallback(async () => {
+    if (!user?.id) return;
+    const updated = await markAllActivityNotificationsAsRead(user.id);
+    setActivityNotifications(updated);
+  }, [user?.id]);
+
+  const markActivityAsRead = useCallback(
+    async (notificationId: string) => {
+      if (!user?.id) return;
+      const updated = await markActivityNotificationAsRead(user.id, notificationId);
+      setActivityNotifications(updated);
+    },
+    [user?.id]
+  );
+
+  const unreadActivityCount = useMemo(
+    () => activityNotifications.filter((item) => !item.readAt).length,
+    [activityNotifications]
   );
 
   useEffect(() => {
@@ -93,8 +175,24 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
   }, [activeNotification, dismissNotification, translateY]);
 
   const value = useMemo<NotificationContextValue>(
-    () => ({ showNotification, dismissNotification }),
-    [dismissNotification, showNotification]
+    () => ({
+      showNotification,
+      dismissNotification,
+      activityNotifications,
+      unreadActivityCount,
+      addActivityNotification,
+      markActivityAsRead,
+      markAllActivityAsRead,
+    }),
+    [
+      activityNotifications,
+      addActivityNotification,
+      dismissNotification,
+      markActivityAsRead,
+      markAllActivityAsRead,
+      showNotification,
+      unreadActivityCount,
+    ]
   );
 
   const variantPalette: Record<NotificationVariant, { bg: string; border: string }> = useMemo(

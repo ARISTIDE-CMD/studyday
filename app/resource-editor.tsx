@@ -34,6 +34,7 @@ import {
   updateResource,
 } from '@/lib/student-api';
 import { useAuth } from '@/providers/auth-provider';
+import { useInAppNotification } from '@/providers/notification-provider';
 
 const types = ['note', 'link', 'file'] as const;
 type ResourceType = (typeof types)[number];
@@ -68,6 +69,7 @@ function buildPrintableHtml(title: string, text: string) {
 
 export default function ResourceEditorScreen() {
   const { user } = useAuth();
+  const { addActivityNotification } = useInAppNotification();
   const { colors } = useAppTheme();
   const { t, locale } = useI18n();
   const { resourceId } = useLocalSearchParams<{ resourceId?: string }>();
@@ -171,7 +173,7 @@ export default function ResourceEditorScreen() {
           tags: parsedTags,
         });
       } else {
-        await createResource({
+        const createdResource = await createResource({
           userId: user.id,
           title: title.trim(),
           type,
@@ -179,6 +181,16 @@ export default function ResourceEditorScreen() {
           fileUrl,
           tags: parsedTags,
         });
+        try {
+          await addActivityNotification({
+            entityType: 'resource',
+            entityId: createdResource.id,
+            title: t('activityNotifications.resourceCreatedTitle'),
+            message: t('activityNotifications.resourceCreatedMessage', { title: createdResource.title }),
+          });
+        } catch {
+          // Keep local-first resource creation behavior even if notification persistence fails.
+        }
       }
 
       pushToast(t('resourceEditor.saveSuccess'), 900);
