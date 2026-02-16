@@ -1,7 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import * as Clipboard from 'expo-clipboard';
-import { router } from 'expo-router';
-import React, { useEffect, useMemo, useState } from 'react';
+import { router, useLocalSearchParams } from 'expo-router';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -49,8 +49,13 @@ const FEATURE_OPTIONS: FeatureOption[] = [
   { id: 'anti_procrastination', labelKey: 'aiToolbox.featureAntiProcrastination' },
 ];
 
+function isAiFeatureId(value: string): value is AiFeatureId {
+  return FEATURE_OPTIONS.some((option) => option.id === value);
+}
+
 export default function AiToolboxScreen() {
   const { user } = useAuth();
+  const params = useLocalSearchParams<{ feature?: string; seed?: string; autorun?: string }>();
   const isOnline = useConnectivity();
   const { colors } = useAppTheme();
   const { t, locale } = useI18n();
@@ -65,6 +70,18 @@ export default function AiToolboxScreen() {
   const [statusText, setStatusText] = useState('');
   const [tasks, setTasks] = useState<Awaited<ReturnType<typeof getCachedTasks>>>([]);
   const [resources, setResources] = useState<Awaited<ReturnType<typeof getCachedResources>>>([]);
+  const [autoRan, setAutoRan] = useState(false);
+
+  useEffect(() => {
+    const feature = params.feature?.trim();
+    if (feature && isAiFeatureId(feature)) {
+      setSelected(feature);
+    }
+    if (typeof params.seed === 'string' && params.seed.trim()) {
+      setInput(params.seed.trim());
+    }
+    setAutoRan(false);
+  }, [params.autorun, params.feature, params.seed]);
 
   useEffect(() => {
     const run = async () => {
@@ -102,7 +119,7 @@ export default function AiToolboxScreen() {
     void run();
   }, [isOnline, user?.id]);
 
-  const runFeature = async () => {
+  const runFeature = useCallback(async () => {
     if (!user?.id) return;
     setLoading(true);
     setStatusText('');
@@ -129,7 +146,14 @@ export default function AiToolboxScreen() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [input, isOnline, locale, resources, selected, t, tasks, user?.id]);
+
+  useEffect(() => {
+    if (!user?.id || contextLoading || loading || autoRan) return;
+    if (params.autorun !== '1') return;
+    setAutoRan(true);
+    void runFeature();
+  }, [autoRan, contextLoading, loading, params.autorun, runFeature, user?.id]);
 
   const copyOutput = async () => {
     if (!output.trim()) return;

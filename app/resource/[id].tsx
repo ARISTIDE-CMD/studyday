@@ -194,6 +194,16 @@ export default function ResourceDetailScreen() {
     }
   };
 
+  const openAiFeature = (featureId: 'quiz_generator' | 'simplify_document') => {
+    if (!resource) return;
+    const seed = [resource.title?.trim(), resource.content?.trim(), resource.file_url?.trim()]
+      .filter(Boolean)
+      .join('\n')
+      .slice(0, 900);
+    const encodedSeed = encodeURIComponent(seed);
+    router.push(`/ai-toolbox?feature=${featureId}&autorun=1&seed=${encodedSeed}`);
+  };
+
   return (
     <View style={styles.page}>
       <ScrollView contentContainerStyle={styles.content}>
@@ -343,6 +353,18 @@ export default function ResourceDetailScreen() {
               onPress={() => router.push(`/resource-editor?resourceId=${resource.id}`)}>
               <Text style={styles.editButtonText}>{t('resourceDetail.edit')}</Text>
             </TouchableOpacity>
+
+            <View style={styles.aiRow}>
+              <TouchableOpacity style={styles.shareButton} onPress={() => openAiFeature('quiz_generator')}>
+                <Ionicons name="help-circle-outline" size={16} color={colors.text} />
+                <Text style={styles.shareButtonText}>{t('resourceDetail.aiQuiz')}</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity style={styles.shareButton} onPress={() => openAiFeature('simplify_document')}>
+                <Ionicons name="sparkles-outline" size={16} color={colors.text} />
+                <Text style={styles.shareButtonText}>{t('resourceDetail.aiSimplify')}</Text>
+              </TouchableOpacity>
+            </View>
           </>
         ) : null}
       </ScrollView>
@@ -528,5 +550,11 @@ const createStyles = (colors: ReturnType<typeof useAppTheme>['colors']) =>
     editButtonText: {
       color: colors.text,
       fontWeight: '700',
+    },
+    aiRow: {
+      marginTop: 10,
+      flexDirection: 'row',
+      gap: 8,
+      flexWrap: 'wrap',
     },
   });

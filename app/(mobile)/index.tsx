@@ -584,6 +584,12 @@ export default function HomeDashboardScreen() {
               <Text style={styles.statText}>{t('home.overdue')}</Text>
             </View>
           </View>
+          <TouchableOpacity
+            style={styles.dayAiButton}
+            onPress={() => router.push('/ai-toolbox?feature=weekly_planning&autorun=1')}>
+            <Ionicons name="sparkles-outline" size={14} color={colors.primary} />
+            <Text style={styles.dayAiText}>{t('home.aiPlanWeek')}</Text>
+          </TouchableOpacity>
         </Animated.View>
 
         {loading ? (
@@ -958,6 +964,22 @@ const createStyles = (
   statText: {
     color: '#DCE3FF',
     marginTop: 2,
+  },
+  dayAiButton: {
+    marginTop: 12,
+    alignSelf: 'flex-start',
+    borderRadius: 999,
+    paddingHorizontal: 11,
+    paddingVertical: 7,
+    backgroundColor: '#FFFFFF',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  dayAiText: {
+    color: colors.primary,
+    fontWeight: '700',
+    fontSize: 12,
   },
   statDivider: {
     width: 1,

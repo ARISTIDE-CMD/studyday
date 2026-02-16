@@ -17,8 +17,10 @@ import {
 } from 'react-native';
 
 import { Toast } from '@/components/ui/toast';
+import { useConnectivity } from '@/hooks/use-connectivity';
 import { useAppTheme } from '@/hooks/use-app-theme';
 import { useI18n } from '@/hooks/use-i18n';
+import { runAiToolbox } from '@/lib/ai-toolbox';
 import { getErrorMessage } from '@/lib/errors';
 import { createTask, fetchTaskById, getCachedTaskById, updateTask } from '@/lib/student-api';
 import { formatDateLabel, toIsoDate } from '@/lib/format';
@@ -77,6 +79,7 @@ function buildCalendarCells(monthDate: Date): CalendarCell[] {
 export default function TaskEditorScreen() {
   const { user } = useAuth();
   const { addActivityNotification } = useInAppNotification();
+  const isOnline = useConnectivity();
   const { colors } = useAppTheme();
   const { t, locale } = useI18n();
   const { taskId } = useLocalSearchParams<{ taskId?: string }>();
@@ -92,9 +95,10 @@ export default function TaskEditorScreen() {
   const [priority, setPriority] = useState<Priority>('medium');
   const [isPersistent, setIsPersistent] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [aiLoading, setAiLoading] = useState(false);
   const [screenLoading, setScreenLoading] = useState(false);
   const [error, setError] = useState('');
-  const [showToast, setShowToast] = useState(false);
+  const [toastMessage, setToastMessage] = useState('');
   const styles = useMemo(() => createStyles(colors), [colors]);
   const selectedDate = useMemo(() => parseIsoDate(dueDate), [dueDate]);
   const monthLabel = useMemo(
@@ -196,9 +200,9 @@ export default function TaskEditorScreen() {
         }
       }
 
-      setShowToast(true);
+      setToastMessage(t('taskEditor.saveSuccess'));
       setTimeout(() => {
-        setShowToast(false);
+        setToastMessage('');
         router.back();
       }, 900);
     } catch (err) {
@@ -216,6 +220,31 @@ export default function TaskEditorScreen() {
   };
 
   const todayIso = toIsoDate();
+
+  const onAiBreakdown = async () => {
+    if (!title.trim() && !description.trim()) {
+      setError(t('taskEditor.aiBreakdownMissingInput'));
+      return;
+    }
+
+    setAiLoading(true);
+    setError('');
+    try {
+      const result = await runAiToolbox({
+        featureId: 'task_breakdown',
+        input: [title.trim(), description.trim()].filter(Boolean).join('\n'),
+        locale,
+        preferOnline: isOnline,
+      });
+      setDescription(result.text);
+      setToastMessage(t('taskEditor.aiBreakdownSuccess'));
+      setTimeout(() => setToastMessage(''), 1200);
+    } catch (err) {
+      setError(getErrorMessage(err, t('taskEditor.aiBreakdownError')));
+    } finally {
+      setAiLoading(false);
+    }
+  };
 
   return (
     <KeyboardAvoidingView style={styles.page} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
@@ -253,6 +282,20 @@ export default function TaskEditorScreen() {
               multiline
               textAlignVertical="top"
             />
+
+            <TouchableOpacity
+              style={[styles.aiActionBtn, aiLoading && styles.saveBtnDisabled]}
+              onPress={() => void onAiBreakdown()}
+              disabled={aiLoading}>
+              {aiLoading ? (
+                <ActivityIndicator size="small" color={colors.primary} />
+              ) : (
+                <>
+                  <Ionicons name="sparkles-outline" size={15} color={colors.primary} />
+                  <Text style={styles.aiActionText}>{t('taskEditor.aiBreakdownButton')}</Text>
+                </>
+              )}
+            </TouchableOpacity>
 
             <Text style={styles.label}>{t('taskEditor.fieldDueDate')}</Text>
             <TouchableOpacity style={styles.datePickerBtn} onPress={openCalendar}>
@@ -365,7 +408,7 @@ export default function TaskEditorScreen() {
         </Pressable>
       </Modal>
 
-      {showToast ? <Toast message={t('taskEditor.saveSuccess')} /> : null}
+      {toastMessage ? <Toast message={toastMessage} /> : null}
     </KeyboardAvoidingView>
   );
 }
@@ -421,6 +464,24 @@ const createStyles = (colors: ReturnType<typeof useAppTheme>['colors']) =>
   textArea: {
     minHeight: 110,
     paddingTop: 12,
+  },
+  aiActionBtn: {
+    marginTop: 8,
+    alignSelf: 'flex-start',
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.surface,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 7,
+  },
+  aiActionText: {
+    color: colors.primary,
+    fontWeight: '700',
+    fontSize: 12,
   },
   datePickerBtn: {
     borderRadius: 12,
