@@ -167,7 +167,7 @@ export default function AiToolboxScreen() {
 
   return (
     <View style={styles.page}>
-      <ScrollView contentContainerStyle={styles.content}>
+      <View style={styles.stickyHeader}>
         <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
           <Ionicons name="chevron-back" size={18} color={colors.text} />
           <Text style={styles.backLabel}>{t('common.back')}</Text>
@@ -184,7 +184,9 @@ export default function AiToolboxScreen() {
             {t('aiToolbox.contextCount', { tasks: tasks.length, resources: resources.length })}
           </Text>
         </View>
+      </View>
 
+      <ScrollView contentContainerStyle={styles.content}>
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.featuresRow}>
           {FEATURE_OPTIONS.map((option) => {
             const active = selected === option.id;
@@ -261,8 +263,16 @@ const createStyles = (colors: ReturnType<typeof useAppTheme>['colors']) =>
       flex: 1,
       backgroundColor: colors.background,
     },
-    content: {
+    stickyHeader: {
+      backgroundColor: colors.background,
       paddingTop: 56,
+      paddingHorizontal: 16,
+      paddingBottom: 10,
+      borderBottomWidth: StyleSheet.hairlineWidth,
+      borderBottomColor: colors.border,
+    },
+    content: {
+      paddingTop: 12,
       paddingHorizontal: 16,
       paddingBottom: 120,
     },

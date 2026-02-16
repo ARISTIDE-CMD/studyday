@@ -73,6 +73,7 @@ function RootNavigator() {
         <Stack.Screen name="notifications-center" />
         <Stack.Screen name="search" />
         <Stack.Screen name="ai-toolbox" />
+        <Stack.Screen name="schedule-planner" />
       </Stack>
       <StatusBar style={isDark ? 'light' : 'dark'} />
     </ThemeProvider>

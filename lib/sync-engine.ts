@@ -2,6 +2,7 @@ import { getErrorMessage } from '@/lib/errors';
 import {
   getOutboxOperations,
   setLocalProfile,
+  upsertLocalSchedule,
   updateOutboxOperation,
   upsertLocalResource,
   removeOutboxOperation,
@@ -62,7 +63,7 @@ function isMissingTaskArchiveColumnError(error: unknown): boolean {
 }
 
 async function syncOperation(operation: OutboxOperation): Promise<void> {
-  if (operation.entity === 'task' || operation.entity === 'resource') {
+  if (operation.entity === 'task' || operation.entity === 'resource' || operation.entity === 'schedule') {
     const { error: profileError } = await supabase
       .from('profiles')
       .upsert({ id: operation.userId }, { onConflict: 'id' });
@@ -116,6 +117,23 @@ async function syncOperation(operation: OutboxOperation): Promise<void> {
 
     const { error } = await supabase
       .from('tasks')
+      .delete()
+      .eq('id', operation.recordId)
+      .eq('user_id', operation.userId);
+    if (error) throw error;
+    return;
+  }
+
+  if (operation.entity === 'schedule') {
+    if (operation.action === 'upsert') {
+      const { error } = await supabase.from('study_schedules').upsert(operation.record, { onConflict: 'id' });
+      if (error) throw error;
+      await upsertLocalSchedule(operation.userId, operation.record);
+      return;
+    }
+
+    const { error } = await supabase
+      .from('study_schedules')
       .delete()
       .eq('id', operation.recordId)
       .eq('user_id', operation.userId);

@@ -584,12 +584,19 @@ export default function HomeDashboardScreen() {
               <Text style={styles.statText}>{t('home.overdue')}</Text>
             </View>
           </View>
-          <TouchableOpacity
-            style={styles.dayAiButton}
-            onPress={() => router.push('/ai-toolbox?feature=weekly_planning&autorun=1')}>
-            <Ionicons name="sparkles-outline" size={14} color={colors.primary} />
-            <Text style={styles.dayAiText}>{t('home.aiPlanWeek')}</Text>
-          </TouchableOpacity>
+          <View style={styles.dayActionsRow}>
+            <TouchableOpacity
+              style={styles.dayAiButton}
+              onPress={() => router.push('/ai-toolbox?feature=weekly_planning&autorun=1')}>
+              <Ionicons name="sparkles-outline" size={14} color={colors.primary} />
+              <Text style={styles.dayAiText}>{t('home.aiPlanWeek')}</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity style={styles.dayAiButton} onPress={() => router.push('/schedule-planner')}>
+              <Ionicons name="calendar-outline" size={14} color={colors.primary} />
+              <Text style={styles.dayAiText}>{t('home.timetableBuilder')}</Text>
+            </TouchableOpacity>
+          </View>
         </Animated.View>
 
         {loading ? (
@@ -967,7 +974,6 @@ const createStyles = (
   },
   dayAiButton: {
     marginTop: 12,
-    alignSelf: 'flex-start',
     borderRadius: 999,
     paddingHorizontal: 11,
     paddingVertical: 7,
@@ -975,6 +981,12 @@ const createStyles = (
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
+  },
+  dayActionsRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    gap: 8,
   },
   dayAiText: {
     color: colors.primary,

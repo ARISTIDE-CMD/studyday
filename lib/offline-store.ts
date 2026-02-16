@@ -2,6 +2,7 @@ import * as FileSystem from 'expo-file-system/legacy';
 import { Platform } from 'react-native';
 
 import type { Announcement, Profile, Resource, Task } from '@/types/supabase';
+import type { StudySchedulePlan } from '@/types/study-schedule';
 
 const STORAGE_KEY = 'studyday-offline-state-v1';
 const FILE_PATH = FileSystem.documentDirectory
@@ -53,17 +54,38 @@ type OutboxProfileUpsert = {
   createdAt: string;
 };
 
+type OutboxScheduleUpsert = {
+  id: string;
+  entity: 'schedule';
+  action: 'upsert';
+  userId: string;
+  record: StudySchedulePlan;
+  createdAt: string;
+};
+
+type OutboxScheduleDelete = {
+  id: string;
+  entity: 'schedule';
+  action: 'delete';
+  userId: string;
+  recordId: string;
+  createdAt: string;
+};
+
 export type OutboxOperation =
   | OutboxTaskUpsert
   | OutboxTaskDelete
   | OutboxResourceUpsert
   | OutboxResourceDelete
-  | OutboxProfileUpsert;
+  | OutboxProfileUpsert
+  | OutboxScheduleUpsert
+  | OutboxScheduleDelete;
 
 type OfflineState = {
   profilesByUser: Record<string, Profile>;
   tasksByUser: Record<string, Task[]>;
   resourcesByUser: Record<string, Resource[]>;
+  schedulesByUser: Record<string, StudySchedulePlan[]>;
   announcements: Announcement[];
   outbox: OutboxOperation[];
   updatedAt: string | null;
@@ -73,6 +95,7 @@ const defaultState: OfflineState = {
   profilesByUser: {},
   tasksByUser: {},
   resourcesByUser: {},
+  schedulesByUser: {},
   announcements: [],
   outbox: [],
   updatedAt: null,
@@ -97,6 +120,8 @@ function ensureStateShape(value: unknown): OfflineState {
     tasksByUser: partial.tasksByUser && typeof partial.tasksByUser === 'object' ? partial.tasksByUser : {},
     resourcesByUser:
       partial.resourcesByUser && typeof partial.resourcesByUser === 'object' ? partial.resourcesByUser : {},
+    schedulesByUser:
+      partial.schedulesByUser && typeof partial.schedulesByUser === 'object' ? partial.schedulesByUser : {},
     announcements: Array.isArray(partial.announcements) ? partial.announcements : [],
     outbox: Array.isArray(partial.outbox) ? partial.outbox : [],
     updatedAt: typeof partial.updatedAt === 'string' ? partial.updatedAt : null,
@@ -135,6 +160,7 @@ function sanitizeStateForEntityIds(input: OfflineState): OfflineState {
   const state = cloneState(input);
   const taskIdMapByUser = new Map<string, Map<string, string>>();
   const resourceIdMapByUser = new Map<string, Map<string, string>>();
+  const scheduleIdMapByUser = new Map<string, Map<string, string>>();
 
   Object.entries(state.tasksByUser).forEach(([userId, tasks]) => {
     const map = new Map<string, string>();
@@ -158,6 +184,18 @@ function sanitizeStateForEntityIds(input: OfflineState): OfflineState {
     });
     resourceIdMapByUser.set(userId, map);
     state.resourcesByUser[userId] = normalized;
+  });
+
+  Object.entries(state.schedulesByUser).forEach(([userId, schedules]) => {
+    const map = new Map<string, string>();
+    const normalized = schedules.map((schedule) => {
+      if (isUuid(schedule.id)) return schedule;
+      const nextId = createEntityId();
+      map.set(schedule.id, nextId);
+      return { ...schedule, id: nextId };
+    });
+    scheduleIdMapByUser.set(userId, map);
+    state.schedulesByUser[userId] = normalized;
   });
 
   state.outbox = state.outbox.map((operation) => {
@@ -189,7 +227,31 @@ function sanitizeStateForEntityIds(input: OfflineState): OfflineState {
       return operation;
     }
 
-    const map = resourceIdMapByUser.get(operation.userId);
+    if (operation.entity === 'resource') {
+      const map = resourceIdMapByUser.get(operation.userId);
+      if (operation.action === 'upsert') {
+        const remapped = map?.get(operation.record.id);
+        if (remapped) {
+          return { ...operation, record: { ...operation.record, id: remapped } };
+        }
+        if (!isUuid(operation.record.id)) {
+          const nextId = createEntityId();
+          return { ...operation, record: { ...operation.record, id: nextId } };
+        }
+        return operation;
+      }
+
+      const remapped = map?.get(operation.recordId);
+      if (remapped) {
+        return { ...operation, recordId: remapped };
+      }
+      if (!isUuid(operation.recordId)) {
+        return { ...operation, recordId: createEntityId() };
+      }
+      return operation;
+    }
+
+    const map = scheduleIdMapByUser.get(operation.userId);
     if (operation.action === 'upsert') {
       const remapped = map?.get(operation.record.id);
       if (remapped) {
@@ -394,6 +456,42 @@ export async function removeLocalResource(userId: string, resourceId: string): P
   await updateState((state) => {
     const list = state.resourcesByUser[userId] ?? [];
     state.resourcesByUser[userId] = list.filter((resource) => resource.id !== resourceId);
+  });
+}
+
+export async function getLocalSchedules(userId: string): Promise<StudySchedulePlan[]> {
+  const state = await loadState();
+  return [...(state.schedulesByUser[userId] ?? [])];
+}
+
+export async function getLocalScheduleById(userId: string, scheduleId: string): Promise<StudySchedulePlan | null> {
+  const schedules = await getLocalSchedules(userId);
+  return schedules.find((schedule) => schedule.id === scheduleId) ?? null;
+}
+
+export async function setLocalSchedules(userId: string, schedules: StudySchedulePlan[]): Promise<void> {
+  await updateState((state) => {
+    state.schedulesByUser[userId] = [...schedules];
+  });
+}
+
+export async function upsertLocalSchedule(userId: string, schedule: StudySchedulePlan): Promise<void> {
+  await updateState((state) => {
+    const list = state.schedulesByUser[userId] ?? [];
+    const index = list.findIndex((item) => item.id === schedule.id);
+    if (index === -1) {
+      list.push(schedule);
+    } else {
+      list[index] = schedule;
+    }
+    state.schedulesByUser[userId] = list;
+  });
+}
+
+export async function removeLocalSchedule(userId: string, scheduleId: string): Promise<void> {
+  await updateState((state) => {
+    const list = state.schedulesByUser[userId] ?? [];
+    state.schedulesByUser[userId] = list.filter((schedule) => schedule.id !== scheduleId);
   });
 }
 

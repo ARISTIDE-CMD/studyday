@@ -267,10 +267,7 @@ export default function ResourcesScreen() {
   return (
     <TabSwipeShell tab="resources">
     <View style={styles.page}>
-      <ScrollView
-        contentContainerStyle={styles.content}
-        showsVerticalScrollIndicator={false}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => void onRefresh()} tintColor={colors.primary} />}>
+      <View style={styles.stickyHeader}>
         <View style={styles.header}>
           <Text style={styles.title}>{t('resources.title')}</Text>
           <TouchableOpacity style={styles.addBtn} onPress={() => router.push('/resource-editor')}>
@@ -310,7 +307,12 @@ export default function ResourcesScreen() {
             </TouchableOpacity>
           ))}
         </ScrollView>
+      </View>
 
+      <ScrollView
+        contentContainerStyle={styles.content}
+        showsVerticalScrollIndicator={false}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => void onRefresh()} tintColor={colors.primary} />}>
         {isSelectionMode ? (
           <View style={styles.selectionBar}>
             <Text style={styles.selectionLabel}>
@@ -507,8 +509,16 @@ const createStyles = (
       flex: 1,
       backgroundColor: colors.background,
     },
-    content: {
+    stickyHeader: {
+      backgroundColor: colors.background,
       paddingTop: 56,
+      paddingHorizontal: 16,
+      paddingBottom: 10,
+      borderBottomWidth: StyleSheet.hairlineWidth,
+      borderBottomColor: colors.border,
+    },
+    content: {
+      paddingTop: 12,
       paddingHorizontal: 16,
       paddingBottom: 110,
     },

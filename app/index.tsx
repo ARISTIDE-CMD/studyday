@@ -1,3 +1,4 @@
+import { Ionicons } from '@expo/vector-icons';
 import { Redirect } from 'expo-router';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Animated, Easing, StyleSheet, Text, View } from 'react-native';
@@ -8,6 +9,7 @@ import { useI18n } from '@/hooks/use-i18n';
 import { useAuth } from '@/providers/auth-provider';
 
 const MIN_LAUNCH_DURATION_MS = 1400;
+const AI_HINT_ROTATION_MS = 2300;
 
 export default function Index() {
   const { session, loading, shouldShowPostLoginIntro } = useAuth();
@@ -17,7 +19,13 @@ export default function Index() {
   const fadeAnim = useRef(new Animated.Value(0)).current;
   const floatAnim = useRef(new Animated.Value(0)).current;
   const pulseAnim = useRef(new Animated.Value(0)).current;
+  const aiHintAnim = useRef(new Animated.Value(1)).current;
   const styles = useMemo(() => createStyles(colors, cardShadow), [cardShadow, colors]);
+  const aiHints = useMemo(
+    () => [t('launch.aiHintTasks'), t('launch.aiHintPlanning'), t('launch.aiHintResources')],
+    [t]
+  );
+  const [aiHintIndex, setAiHintIndex] = useState(0);
 
   useEffect(() => {
     const timer = setTimeout(() => setMinDelayDone(true), MIN_LAUNCH_DURATION_MS);
@@ -68,6 +76,30 @@ export default function Index() {
     };
   }, [fadeAnim, floatAnim, pulseAnim]);
 
+  useEffect(() => {
+    if (aiHints.length <= 1) return;
+
+    const rotate = () => {
+      Animated.timing(aiHintAnim, {
+        toValue: 0,
+        duration: 170,
+        easing: Easing.out(Easing.quad),
+        useNativeDriver: true,
+      }).start(() => {
+        setAiHintIndex((prev) => (prev + 1) % aiHints.length);
+        Animated.timing(aiHintAnim, {
+          toValue: 1,
+          duration: 240,
+          easing: Easing.out(Easing.quad),
+          useNativeDriver: true,
+        }).start();
+      });
+    };
+
+    const interval = setInterval(rotate, AI_HINT_ROTATION_MS);
+    return () => clearInterval(interval);
+  }, [aiHintAnim, aiHints.length]);
+
   if (!loading && minDelayDone) {
     if (session) {
       if (shouldShowPostLoginIntro) {
@@ -90,6 +122,10 @@ export default function Index() {
     inputRange: [0, 1],
     outputRange: [0.32, 0.6],
   });
+  const aiHintTranslateY = aiHintAnim.interpolate({
+    inputRange: [0, 1],
+    outputRange: [6, 0],
+  });
 
   return (
     <View style={styles.page}>
@@ -111,9 +147,27 @@ export default function Index() {
             transform: [{ translateY: cardTranslateY }],
           },
         ]}>
-        <BrandLogo size={54} align="center" caption={t('launch.brandCaption')} />
+        <BrandLogo size={66} align="center" caption={t('launch.brandCaption')} />
         <Text style={styles.title}>{t('launch.title')}</Text>
         <Text style={styles.subtitle}>{t('launch.subtitle')}</Text>
+
+        <View style={styles.aiCard}>
+          <View style={styles.aiCardHeader}>
+            <View style={styles.aiDot} />
+            <Ionicons name="sparkles-outline" size={13} color={colors.primary} />
+            <Text style={styles.aiKicker}>{t('launch.aiKicker')}</Text>
+          </View>
+          <Animated.Text
+            style={[
+              styles.aiHintText,
+              {
+                opacity: aiHintAnim,
+                transform: [{ translateY: aiHintTranslateY }],
+              },
+            ]}>
+            {aiHints[aiHintIndex]}
+          </Animated.Text>
+        </View>
 
         <View style={styles.statusRow}>
           <ActivityIndicator color={colors.primary} size="small" />
@@ -171,7 +225,40 @@ const createStyles = (
       textAlign: 'center',
       lineHeight: 20,
       marginTop: 2,
-      marginBottom: 8,
+      marginBottom: 2,
+    },
+    aiCard: {
+      width: '100%',
+      marginTop: 6,
+      borderRadius: 14,
+      borderWidth: 1,
+      borderColor: colors.border,
+      backgroundColor: colors.background,
+      paddingHorizontal: 12,
+      paddingVertical: 10,
+      gap: 6,
+    },
+    aiCardHeader: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 6,
+    },
+    aiDot: {
+      width: 7,
+      height: 7,
+      borderRadius: 999,
+      backgroundColor: colors.success,
+    },
+    aiKicker: {
+      color: colors.primary,
+      fontWeight: '700',
+      fontSize: 12,
+    },
+    aiHintText: {
+      color: colors.text,
+      fontWeight: '600',
+      lineHeight: 18,
+      minHeight: 36,
     },
     statusRow: {
       marginTop: 6,
