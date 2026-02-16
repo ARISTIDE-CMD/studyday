@@ -7,16 +7,13 @@ import {
   ActivityIndicator,
   Animated,
   Easing,
-  LayoutAnimation,
   Modal,
-  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
   Switch,
   Text,
   TouchableOpacity,
-  UIManager,
   View,
 } from 'react-native';
 
@@ -156,14 +153,10 @@ export default function ProfileScreen() {
   const [loading, setLoading] = useState(true);
   const [totalTasks, setTotalTasks] = useState(0);
   const [doneTasks, setDoneTasks] = useState(0);
-  const [weekDoneTasks, setWeekDoneTasks] = useState(0);
   const [streakDays, setStreakDays] = useState(0);
   const [focusWeekSessions, setFocusWeekSessions] = useState(0);
-  const [focusTotalSessions, setFocusTotalSessions] = useState(0);
-  const [focusStreakDays, setFocusStreakDays] = useState(0);
   const [statsError, setStatsError] = useState('');
-  const [preferencesOpen, setPreferencesOpen] = useState(false);
-  const [securityOpen, setSecurityOpen] = useState(false);
+  const [settingsModalVisible, setSettingsModalVisible] = useState(false);
   const [signOutModalVisible, setSignOutModalVisible] = useState(false);
   const [signOutAction, setSignOutAction] = useState<'continue' | 'sync' | null>(null);
   const avatarPulse = React.useRef(new Animated.Value(0)).current;
@@ -173,26 +166,7 @@ export default function ProfileScreen() {
     || (typeof user?.user_metadata?.avatar_url === 'string' ? user.user_metadata.avatar_url.trim() : '');
   const completionRate = totalTasks > 0 ? doneTasks / totalTasks : 0;
   const pendingTasks = Math.max(totalTasks - doneTasks, 0);
-  const weeklyGoal = 5;
-  const badges = useMemo(
-    () =>
-      [
-        { key: 'first_task', unlocked: doneTasks >= 1, label: t('profile.badgeFirstTask') },
-        { key: 'weekly_goal', unlocked: weekDoneTasks >= weeklyGoal, label: t('profile.badgeWeeklyGoal') },
-        { key: 'streak7', unlocked: streakDays >= 7, label: t('profile.badgeStreak7') },
-        { key: 'focus5', unlocked: focusTotalSessions >= 5, label: t('profile.badgeFocus5') },
-        { key: 'focus_streak', unlocked: focusStreakDays >= 3, label: t('profile.badgeFocusStreak') },
-      ] as { key: string; unlocked: boolean; label: string }[],
-    [doneTasks, focusStreakDays, focusTotalSessions, streakDays, t, weekDoneTasks]
-  );
-
   const themedStyles = useMemo(() => createStyles(colors, cardShadow), [cardShadow, colors]);
-
-  useEffect(() => {
-    if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
-      UIManager.setLayoutAnimationEnabledExperimental(true);
-    }
-  }, []);
 
   useEffect(() => {
     const loop = Animated.loop(
@@ -246,27 +220,12 @@ export default function ProfileScreen() {
       setTotalTasks(cachedStats.total);
       setDoneTasks(cachedStats.done);
       setFocusWeekSessions(cachedFocusStats.weekSessions);
-      setFocusTotalSessions(cachedFocusStats.totalSessions);
-      setFocusStreakDays(cachedFocusStats.streakDays);
-
-      const weekStart = new Date();
-      weekStart.setHours(0, 0, 0, 0);
-      weekStart.setDate(weekStart.getDate() - 6);
-      const weekStartMs = weekStart.getTime();
 
       const cachedDoneDates = new Set(
         cachedTasks
           .filter((task) => task.status === 'done' && task.completed_at)
           .map((task) => (task.completed_at as string).slice(0, 10))
       );
-      const cachedWeekDone = cachedTasks.filter((task) => {
-        if (!task.completed_at) return false;
-        const completedAtMs = Date.parse(task.completed_at);
-        if (Number.isNaN(completedAtMs)) return false;
-        return completedAtMs >= weekStartMs;
-      }).length;
-
-      setWeekDoneTasks(cachedWeekDone);
       setStreakDays(computeStreakDays(cachedDoneDates));
       if (shouldShowBlockingLoader) {
         setLoading(false);
@@ -280,22 +239,12 @@ export default function ProfileScreen() {
       setTotalTasks(stats.total);
       setDoneTasks(stats.done);
       setFocusWeekSessions(remoteFocusStats.weekSessions);
-      setFocusTotalSessions(remoteFocusStats.totalSessions);
-      setFocusStreakDays(remoteFocusStats.streakDays);
 
       const remoteDoneDates = new Set(
         remoteTasks
           .filter((task) => task.status === 'done' && task.completed_at)
           .map((task) => (task.completed_at as string).slice(0, 10))
       );
-      const remoteWeekDone = remoteTasks.filter((task) => {
-        if (!task.completed_at) return false;
-        const completedAtMs = Date.parse(task.completed_at);
-        if (Number.isNaN(completedAtMs)) return false;
-        return completedAtMs >= weekStartMs;
-      }).length;
-
-      setWeekDoneTasks(remoteWeekDone);
       setStreakDays(computeStreakDays(remoteDoneDates));
     } catch (error) {
       setStatsError(getErrorMessage(error, t('profile.statsError')));
@@ -321,6 +270,7 @@ export default function ProfileScreen() {
 
   const onRequestSignOut = () => {
     if (pendingOperations > 0) {
+      setSettingsModalVisible(false);
       setSignOutModalVisible(true);
       return;
     }
@@ -348,24 +298,22 @@ export default function ProfileScreen() {
     }
   };
 
-  const togglePreferences = () => {
-    LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
-    setPreferencesOpen((prev) => !prev);
-  };
-
-  const toggleSecurity = () => {
-    LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
-    setSecurityOpen((prev) => !prev);
-  };
-
   return (
     <TabSwipeShell tab="profile">
     <View style={themedStyles.page}>
-      <ScrollView contentContainerStyle={themedStyles.content} showsVerticalScrollIndicator={false}>
+      <View style={themedStyles.headerBar}>
         <Text style={themedStyles.title}>{t('profile.title')}</Text>
+        <TouchableOpacity style={themedStyles.settingsIconBtn} onPress={() => setSettingsModalVisible(true)}>
+          <Ionicons name="settings-outline" size={20} color={colors.text} />
+        </TouchableOpacity>
+      </View>
 
+      <View style={themedStyles.contentCompact}>
         <View style={themedStyles.profileCard}>
-          <View style={themedStyles.avatarWrap}>
+          <TouchableOpacity
+            style={themedStyles.avatarWrap}
+            activeOpacity={0.85}
+            onPress={() => router.push(`/profile-editor?returnTo=${encodeURIComponent('/profile')}`)}>
             <Animated.View
               pointerEvents="none"
               style={[
@@ -379,11 +327,11 @@ export default function ProfileScreen() {
                 themedStyles.avatar,
                 { borderColor: isOnline ? colors.success : colors.danger },
               ]}>
-            {avatarUrl ? (
-              <Image source={avatarUrl} style={themedStyles.avatarImage} contentFit="cover" cachePolicy="none" />
-            ) : (
-              <Ionicons name="person" size={26} color={colors.primary} />
-            )}
+              {avatarUrl ? (
+                <Image source={avatarUrl} style={themedStyles.avatarImage} contentFit="cover" cachePolicy="none" />
+              ) : (
+                <Ionicons name="person" size={26} color={colors.primary} />
+              )}
             </View>
             <View
               style={[
@@ -391,9 +339,14 @@ export default function ProfileScreen() {
                 { backgroundColor: isOnline ? colors.success : colors.danger, borderColor: colors.surface },
               ]}
             />
-          </View>
+            <View style={themedStyles.avatarCameraBadge}>
+              <Ionicons name="camera-outline" size={12} color="#FFFFFF" />
+            </View>
+          </TouchableOpacity>
+
           <Text style={themedStyles.name}>{profile?.full_name ?? t('profile.fallbackName')}</Text>
           <Text style={themedStyles.email}>{user?.email ?? t('profile.unknownEmail')}</Text>
+          <Text style={themedStyles.avatarHint}>{t('profile.tapToChangePhoto')}</Text>
         </View>
 
         {loading ? (
@@ -401,116 +354,67 @@ export default function ProfileScreen() {
             <ActivityIndicator color={colors.primary} />
           </View>
         ) : (
-          <>
-            <View style={themedStyles.activityCard}>
-              <Text style={themedStyles.activityTitle}>{t('profile.activityTitle')}</Text>
-              <Text style={themedStyles.activitySubtitle}>{t('profile.activitySubtitle')}</Text>
-
-              <View style={themedStyles.activityRingWrap}>
-                <ActivityRing
-                  size={188}
-                  progress={completionRate}
-                  colors={colors}
-                  centerValue={`${Math.round(completionRate * 100)}%`}
-                  centerLabel={t('profile.completionRate')}
-                />
-              </View>
-
-              <View style={themedStyles.activityLegendRow}>
-                <View style={themedStyles.activityLegendItem}>
-                  <Text style={themedStyles.activityLegendValue}>{doneTasks}</Text>
-                  <Text style={themedStyles.activityLegendLabel}>{t('profile.tasksDone')}</Text>
+          <View style={themedStyles.compactStatsCard}>
+            <View style={themedStyles.compactStatsTop}>
+              <ActivityRing
+                size={130}
+                progress={completionRate}
+                colors={colors}
+                centerValue={`${Math.round(completionRate * 100)}%`}
+                centerLabel={t('profile.completionRate')}
+              />
+              <View style={themedStyles.compactStatsGrid}>
+                <View style={themedStyles.compactStatItem}>
+                  <Text style={themedStyles.compactStatValue}>{doneTasks}</Text>
+                  <Text style={themedStyles.compactStatLabel}>{t('profile.tasksDone')}</Text>
                 </View>
-                <View style={themedStyles.activityLegendItem}>
-                  <Text style={themedStyles.activityLegendValue}>{pendingTasks}</Text>
-                  <Text style={themedStyles.activityLegendLabel}>{t('profile.tasksPending')}</Text>
+                <View style={themedStyles.compactStatItem}>
+                  <Text style={themedStyles.compactStatValue}>{pendingTasks}</Text>
+                  <Text style={themedStyles.compactStatLabel}>{t('profile.tasksPending')}</Text>
                 </View>
-                <View style={themedStyles.activityLegendItem}>
-                  <Text style={themedStyles.activityLegendValue}>{totalTasks}</Text>
-                  <Text style={themedStyles.activityLegendLabel}>{t('profile.totalTasksLabel')}</Text>
+                <View style={themedStyles.compactStatItem}>
+                  <Text style={themedStyles.compactStatValue}>{focusWeekSessions}</Text>
+                  <Text style={themedStyles.compactStatLabel}>{t('profile.focusWeekTitle')}</Text>
                 </View>
-              </View>
-
-              <View style={themedStyles.kpiRow}>
-                <View style={themedStyles.kpiCard}>
-                  <Text style={themedStyles.kpiTitle}>{t('profile.streakTitle')}</Text>
-                  <Text style={themedStyles.kpiValue}>{t('profile.streakValue', { count: streakDays })}</Text>
+                <View style={themedStyles.compactStatItem}>
+                  <Text style={themedStyles.compactStatValue}>{streakDays}</Text>
+                  <Text style={themedStyles.compactStatLabel}>{t('profile.streakTitle')}</Text>
                 </View>
-
-                <View style={themedStyles.kpiCard}>
-                  <Text style={themedStyles.kpiTitle}>{t('profile.weekGoalTitle')}</Text>
-                  <Text style={themedStyles.kpiValue}>{t('profile.weekGoalValue', { done: weekDoneTasks, goal: weeklyGoal })}</Text>
-                </View>
-              </View>
-
-              <View style={themedStyles.kpiRow}>
-                <View style={themedStyles.kpiCard}>
-                  <Text style={themedStyles.kpiTitle}>{t('profile.focusWeekTitle')}</Text>
-                  <Text style={themedStyles.kpiValue}>{t('profile.focusWeekValue', { count: focusWeekSessions })}</Text>
-                </View>
-
-                <View style={themedStyles.kpiCard}>
-                  <Text style={themedStyles.kpiTitle}>{t('profile.focusStreakTitle')}</Text>
-                  <Text style={themedStyles.kpiValue}>{t('profile.focusStreakValue', { count: focusStreakDays })}</Text>
-                </View>
-              </View>
-
-              <Text style={themedStyles.badgeSectionTitle}>{t('profile.badgesTitle')}</Text>
-              <View style={themedStyles.badgesWrap}>
-                {badges.map((badge) => (
-                  <View
-                    key={badge.key}
-                    style={[themedStyles.badgeChip, !badge.unlocked && themedStyles.badgeChipLocked]}>
-                    <Ionicons
-                      name={badge.unlocked ? 'ribbon' : 'lock-closed-outline'}
-                      size={12}
-                      color={badge.unlocked ? colors.warning : colors.textMuted}
-                    />
-                    <Text
-                      style={[
-                        themedStyles.badgeChipText,
-                        !badge.unlocked && themedStyles.badgeChipTextLocked,
-                      ]}>
-                      {badge.label}
-                    </Text>
-                  </View>
-                ))}
-              </View>
-
-              <View style={themedStyles.metaRow}>
-                <Text style={themedStyles.metaTitle}>{t('profile.registrationDate')}</Text>
-                <Text style={themedStyles.metaValue}>{formatDateLabel(registrationDate, locale, t('common.noDate'))}</Text>
               </View>
             </View>
-            {statsError ? <Text style={themedStyles.statsError}>{statsError}</Text> : null}
-          </>
+            <View style={themedStyles.metaRow}>
+              <Text style={themedStyles.metaTitle}>{t('profile.registrationDate')}</Text>
+              <Text style={themedStyles.metaValue}>{formatDateLabel(registrationDate, locale, t('common.noDate'))}</Text>
+            </View>
+          </View>
         )}
 
-        <TouchableOpacity
-          style={themedStyles.primaryAction}
-          onPress={() => router.push(`/profile-editor?returnTo=${encodeURIComponent('/profile')}`)}>
-          <Text style={themedStyles.primaryActionText}>{t('profile.editProfile')}</Text>
-        </TouchableOpacity>
+        {statsError ? <Text style={themedStyles.statsError}>{statsError}</Text> : null}
 
-        <TouchableOpacity style={themedStyles.secondaryAction} onPress={() => router.push('/focus')}>
-          <Text style={themedStyles.secondaryActionText}>{t('profile.focusMode')}</Text>
-        </TouchableOpacity>
-
-        <TouchableOpacity style={themedStyles.secondaryAction} onPress={() => router.push('/ai-toolbox')}>
-          <Text style={themedStyles.secondaryActionText}>{t('profile.aiToolbox')}</Text>
-        </TouchableOpacity>
-
-        <View style={themedStyles.accordionCard}>
-          <TouchableOpacity style={themedStyles.accordionHeader} onPress={togglePreferences}>
-            <View style={themedStyles.accordionHeadMain}>
-              <Text style={themedStyles.accordionTitle}>{t('profile.preferences')}</Text>
-              <Text style={themedStyles.accordionHint}>{t('profile.preferencesHint')}</Text>
-            </View>
-            <Ionicons name={preferencesOpen ? 'chevron-up' : 'chevron-down'} size={18} color={colors.textMuted} />
+        <View style={themedStyles.quickActionsRow}>
+          <TouchableOpacity style={themedStyles.secondaryAction} onPress={() => router.push('/focus')}>
+            <Text style={themedStyles.secondaryActionText}>{t('profile.focusMode')}</Text>
           </TouchableOpacity>
 
-          {preferencesOpen ? (
-            <View style={themedStyles.accordionBody}>
+          <TouchableOpacity style={themedStyles.secondaryAction} onPress={() => router.push('/ai-toolbox')}>
+            <Text style={themedStyles.secondaryActionText}>{t('profile.aiToolbox')}</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+
+      <Modal
+        visible={settingsModalVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setSettingsModalVisible(false)}>
+        <Pressable style={themedStyles.settingsModalOverlay} onPress={() => setSettingsModalVisible(false)}>
+          <Pressable style={themedStyles.settingsModalCard} onPress={(event) => event.stopPropagation()}>
+            <TouchableOpacity style={themedStyles.settingsModalClose} onPress={() => setSettingsModalVisible(false)}>
+              <Ionicons name="close" size={18} color={colors.textMuted} />
+            </TouchableOpacity>
+            <Text style={themedStyles.settingsModalTitle}>{t('profile.preferences')}</Text>
+
+            <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={themedStyles.settingsModalBody}>
               <Text style={themedStyles.settingsLabel}>{t('profile.language')}</Text>
               <View style={themedStyles.settingRow}>
                 <SettingChip label={t('profile.french')} active={language === 'fr'} onPress={() => setLanguage('fr')} colors={colors} />
@@ -568,21 +472,8 @@ export default function ProfileScreen() {
                   )}
                 </TouchableOpacity>
               ) : null}
-            </View>
-          ) : null}
-        </View>
 
-        <View style={themedStyles.accordionCard}>
-          <TouchableOpacity style={themedStyles.accordionHeader} onPress={toggleSecurity}>
-            <View style={themedStyles.accordionHeadMain}>
-              <Text style={themedStyles.accordionTitle}>{t('profile.security')}</Text>
-              <Text style={themedStyles.accordionHint}>{t('profile.securityHint')}</Text>
-            </View>
-            <Ionicons name={securityOpen ? 'chevron-up' : 'chevron-down'} size={18} color={colors.textMuted} />
-          </TouchableOpacity>
-
-          {securityOpen ? (
-            <View style={themedStyles.accordionBody}>
+              <Text style={themedStyles.settingsLabel}>{t('profile.security')}</Text>
               <TouchableOpacity style={themedStyles.dangerAction} onPress={onRequestSignOut}>
                 <Text style={themedStyles.dangerActionText}>{t('profile.signOut')}</Text>
               </TouchableOpacity>
@@ -594,18 +485,10 @@ export default function ProfileScreen() {
                 </View>
                 <Text style={themedStyles.privacyText}>{t('profile.privacyDescription')}</Text>
               </View>
-            </View>
-          ) : null}
-        </View>
-
-        <View style={themedStyles.privacyCardCompact}>
-          <View style={themedStyles.privacyHeader}>
-            <Ionicons name="information-circle-outline" size={16} color={colors.primary} />
-            <Text style={themedStyles.privacyTitle}>{t('profile.privacyTitle')}</Text>
-          </View>
-          <Text style={themedStyles.privacyText}>{t('profile.privacyDescription')}</Text>
-        </View>
-      </ScrollView>
+            </ScrollView>
+          </Pressable>
+        </Pressable>
+      </Modal>
 
       <Modal
         visible={signOutModalVisible}
@@ -692,7 +575,30 @@ const createStyles = (
       fontSize: 28,
       fontWeight: '800',
       color: colors.text,
-      marginBottom: 16,
+    },
+    headerBar: {
+      paddingTop: 56,
+      paddingHorizontal: 16,
+      marginBottom: 10,
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+    },
+    settingsIconBtn: {
+      width: 40,
+      height: 40,
+      borderRadius: 12,
+      borderWidth: 1,
+      borderColor: colors.border,
+      backgroundColor: colors.surface,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    contentCompact: {
+      flex: 1,
+      paddingHorizontal: 16,
+      paddingBottom: 18,
+      justifyContent: 'space-between',
     },
     profileCard: {
       backgroundColor: colors.surface,
@@ -723,6 +629,19 @@ const createStyles = (
       justifyContent: 'center',
       position: 'relative',
     },
+    avatarCameraBadge: {
+      position: 'absolute',
+      right: -2,
+      top: -2,
+      width: 20,
+      height: 20,
+      borderRadius: 10,
+      backgroundColor: colors.primary,
+      alignItems: 'center',
+      justifyContent: 'center',
+      borderWidth: 1,
+      borderColor: colors.surface,
+    },
     avatarPulseRing: {
       position: 'absolute',
       width: 62,
@@ -752,8 +671,57 @@ const createStyles = (
       marginTop: 4,
       color: colors.textMuted,
     },
+    avatarHint: {
+      marginTop: 6,
+      color: colors.textMuted,
+      fontSize: 12,
+    },
     loadingWrap: {
       paddingVertical: 20,
+    },
+    compactStatsCard: {
+      backgroundColor: colors.surface,
+      borderRadius: 14,
+      borderWidth: 1,
+      borderColor: colors.border,
+      padding: 12,
+      ...cardShadow,
+    },
+    compactStatsTop: {
+      flexDirection: 'row',
+      gap: 12,
+      alignItems: 'center',
+      marginBottom: 10,
+    },
+    compactStatsGrid: {
+      flex: 1,
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+      gap: 8,
+    },
+    compactStatItem: {
+      width: '47%',
+      borderRadius: 10,
+      borderWidth: 1,
+      borderColor: colors.border,
+      backgroundColor: colors.background,
+      paddingVertical: 8,
+      paddingHorizontal: 8,
+      alignItems: 'center',
+    },
+    compactStatValue: {
+      color: colors.primary,
+      fontWeight: '800',
+      fontSize: 15,
+    },
+    compactStatLabel: {
+      color: colors.textMuted,
+      fontSize: 11,
+      textAlign: 'center',
+      marginTop: 2,
+    },
+    quickActionsRow: {
+      gap: 10,
     },
     activityCard: {
       backgroundColor: colors.surface,
@@ -1105,5 +1073,39 @@ const createStyles = (
     },
     signOutModalBtnDisabled: {
       opacity: 0.7,
+    },
+    settingsModalOverlay: {
+      flex: 1,
+      backgroundColor: 'rgba(2, 6, 23, 0.45)',
+      alignItems: 'center',
+      justifyContent: 'center',
+      paddingHorizontal: 16,
+    },
+    settingsModalCard: {
+      width: '100%',
+      maxHeight: '84%',
+      borderRadius: 16,
+      borderWidth: 1,
+      borderColor: colors.border,
+      backgroundColor: colors.surface,
+      padding: 14,
+      ...cardShadow,
+    },
+    settingsModalClose: {
+      width: 28,
+      height: 28,
+      borderRadius: 14,
+      alignItems: 'center',
+      justifyContent: 'center',
+      alignSelf: 'flex-end',
+    },
+    settingsModalTitle: {
+      color: colors.text,
+      fontWeight: '800',
+      fontSize: 17,
+      marginBottom: 8,
+    },
+    settingsModalBody: {
+      paddingBottom: 8,
     },
   });
