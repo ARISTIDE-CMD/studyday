@@ -58,6 +58,19 @@ export default function TasksScreen() {
     timeoutId: ReturnType<typeof setTimeout>;
   } | null>(null);
   const swipeRefs = useRef<Record<string, Swipeable | null>>({});
+  const hasHydratedRef = useRef(false);
+  const closeAllSwipeables = useCallback((exceptTaskId?: string) => {
+    const entries = Object.entries(swipeRefs.current);
+    for (const [taskId, instance] of entries) {
+      if (!instance) continue;
+      if (exceptTaskId && taskId === exceptTaskId) continue;
+      try {
+        instance.close();
+      } catch {
+        // Ignore stale refs.
+      }
+    }
+  }, []);
 
   const themedStyles = useMemo(() => createStyles(colors, cardShadow), [cardShadow, colors]);
   const priorityStyle = useMemo(
@@ -72,17 +85,22 @@ export default function TasksScreen() {
   const loadTasks = useCallback(async () => {
     if (!user?.id) return;
 
+    const shouldShowBlockingLoader = !hasHydratedRef.current;
     let hasCachedData = false;
 
     try {
-      setLoading(true);
+      if (shouldShowBlockingLoader) {
+        setLoading(true);
+      }
       setError('');
 
       const cached = await getCachedTasks(user.id);
       hasCachedData = cached.length > 0;
       if (hasCachedData) {
         setTasks(cached);
-        setLoading(false);
+        if (shouldShowBlockingLoader) {
+          setLoading(false);
+        }
       }
 
       const data = await fetchTasks(user.id);
@@ -93,7 +111,10 @@ export default function TasksScreen() {
         setError(message);
       }
     } finally {
-      setLoading(false);
+      if (shouldShowBlockingLoader) {
+        setLoading(false);
+      }
+      hasHydratedRef.current = true;
     }
   }, [t, user?.id]);
 
@@ -105,9 +126,11 @@ export default function TasksScreen() {
 
   useFocusEffect(
     useCallback(() => {
+      closeAllSwipeables();
       void loadTasks();
       void loadPreferences();
-    }, [loadPreferences, loadTasks])
+      return () => closeAllSwipeables();
+    }, [closeAllSwipeables, loadPreferences, loadTasks])
   );
 
   const onRefresh = useCallback(async () => {
@@ -271,9 +294,20 @@ export default function TasksScreen() {
   const openSelectedTaskEditor = () => {
     if (selectedTaskIds.length !== 1) return;
     const [taskId] = selectedTaskIds;
+    closeAllSwipeables();
     clearSelection();
-    router.push(`/task-editor?taskId=${taskId}`);
+    router.push(`/task-editor?taskId=${taskId}&returnTo=${encodeURIComponent('/tasks')}`);
   };
+
+  const openTaskEditorFromSwipe = useCallback(
+    (taskId: string) => {
+      closeAllSwipeables();
+      setTimeout(() => {
+        router.push(`/task-editor?taskId=${taskId}&returnTo=${encodeURIComponent('/tasks')}`);
+      }, 120);
+    },
+    [closeAllSwipeables]
+  );
 
   const onToggleFavoriteTask = async (taskId: string) => {
     if (!user?.id) return;
@@ -289,19 +323,6 @@ export default function TasksScreen() {
       setFavoriteTaskIds(previous);
     }
   };
-
-  const closeAllSwipeables = useCallback((exceptTaskId?: string) => {
-    const entries = Object.entries(swipeRefs.current);
-    for (const [taskId, instance] of entries) {
-      if (!instance) continue;
-      if (exceptTaskId && taskId === exceptTaskId) continue;
-      try {
-        instance.close();
-      } catch {
-        // Ignore stale refs.
-      }
-    }
-  }, []);
 
   const filterLabels: { key: Filter; label: string }[] = [
     { key: 'toutes', label: t('tasks.filterAll') },
@@ -510,7 +531,7 @@ export default function TasksScreen() {
                     }}
                     onSwipeableWillOpen={() => closeAllSwipeables(task.id)}
                     renderLeftActions={() => <SwipeAction label={t('tasks.swipeEdit')} color={colors.success} />}
-                    onSwipeableLeftOpen={() => router.push(`/task-editor?taskId=${task.id}`)}
+                    onSwipeableLeftOpen={() => openTaskEditorFromSwipe(task.id)}
                     renderRightActions={() => <SwipeAction label={t('tasks.swipeDelete')} color={colors.danger} />}
                     onSwipeableRightOpen={() => scheduleSwipeDeleteTask(task)}>
                     {card}

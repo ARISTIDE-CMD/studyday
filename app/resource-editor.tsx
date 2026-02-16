@@ -3,7 +3,7 @@ import * as Clipboard from 'expo-clipboard';
 import * as DocumentPicker from 'expo-document-picker';
 import * as Print from 'expo-print';
 import { router, useLocalSearchParams } from 'expo-router';
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -65,17 +65,16 @@ function buildPrintableHtml(title: string, text: string) {
 
 export default function ResourceEditorScreen() {
   const { user } = useAuth();
-  const { addActivityNotification } = useInAppNotification();
+  const { addActivityNotification, showNotification } = useInAppNotification();
   const { colors } = useAppTheme();
   const { t, locale } = useI18n();
-  const { resourceId } = useLocalSearchParams<{ resourceId?: string }>();
+  const { resourceId, returnTo } = useLocalSearchParams<{ resourceId?: string; returnTo?: string }>();
 
   const [title, setTitle] = useState('');
   const [type, setType] = useState<ResourceType>('note');
   const [content, setContent] = useState('');
   const [fileUrl, setFileUrl] = useState('');
   const [tags, setTags] = useState('revision, examen');
-  const [screenLoading, setScreenLoading] = useState(false);
   const [loading, setLoading] = useState(false);
   const [filePicking, setFilePicking] = useState(false);
   const [aiLoading, setAiLoading] = useState(false);
@@ -84,6 +83,23 @@ export default function ResourceEditorScreen() {
   const [undoStack, setUndoStack] = useState<string[]>([]);
   const styles = useMemo(() => createStyles(colors), [colors]);
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const returnPath = useMemo(() => {
+    if (!returnTo || typeof returnTo !== 'string') return null;
+    try {
+      const decoded = decodeURIComponent(returnTo);
+      return decoded.startsWith('/') ? decoded : null;
+    } catch {
+      return null;
+    }
+  }, [returnTo]);
+
+  const closeEditor = useCallback(() => {
+    if (returnPath) {
+      router.replace(returnPath as '/');
+      return;
+    }
+    router.back();
+  }, [returnPath]);
 
   useEffect(() => {
     return () => {
@@ -125,20 +141,16 @@ export default function ResourceEditorScreen() {
       };
 
       try {
-        setScreenLoading(true);
         const cached = await getCachedResourceById(user.id, resourceId);
         if (cached) {
           applyResource(cached);
-          setScreenLoading(false);
         }
 
         const data = await fetchResourceById(user.id, resourceId);
         if (!data) return;
 
         applyResource(data);
-      } finally {
-        setScreenLoading(false);
-      }
+      } finally {}
     };
 
     void run();
@@ -189,10 +201,13 @@ export default function ResourceEditorScreen() {
         }
       }
 
-      pushToast(t('resourceEditor.saveSuccess'), 900);
-      setTimeout(() => {
-        router.back();
-      }, 900);
+      showNotification({
+        title: t('resourceEditor.saveSuccess'),
+        message: resourceId ? t('resourceEditor.editTitle') : t('resourceEditor.createTitle'),
+        variant: 'success',
+        durationMs: 2200,
+      });
+      closeEditor();
     } catch (err) {
       const message = getErrorMessage(err, t('resourceEditor.saveError'));
       setError(message);
@@ -357,165 +372,159 @@ export default function ResourceEditorScreen() {
     <KeyboardAvoidingView style={styles.page} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
         <View style={styles.header}>
-          <TouchableOpacity style={styles.iconBtn} onPress={() => router.back()}>
+          <TouchableOpacity style={styles.iconBtn} onPress={closeEditor}>
             <Ionicons name="chevron-back" size={20} color={colors.text} />
           </TouchableOpacity>
           <Text style={styles.title}>{resourceId ? t('resourceEditor.editTitle') : t('resourceEditor.createTitle')}</Text>
           <View style={styles.iconBtn} />
         </View>
 
-        {screenLoading ? (
-          <View style={styles.screenLoadingWrap}>
-            <ActivityIndicator color={colors.primary} />
+        <>
+          <Text style={styles.label}>{t('resourceEditor.fieldTitle')}</Text>
+          <TextInput
+            style={styles.input}
+            value={title}
+            onChangeText={setTitle}
+            placeholder={t('resourceEditor.titlePlaceholder')}
+            placeholderTextColor="#94A3B8"
+          />
+
+          <Text style={styles.label}>{t('resourceEditor.fieldType')}</Text>
+          <View style={styles.typeRow}>
+            {types.map((item) => (
+              <TouchableOpacity
+                key={item}
+                style={[styles.typeChip, type === item && styles.typeChipActive]}
+                onPress={() => setType(item)}>
+                <Text style={[styles.typeText, type === item && styles.typeTextActive]}>
+                  {t(`resources.filter${item.charAt(0).toUpperCase()}${item.slice(1)}`)}
+                </Text>
+              </TouchableOpacity>
+            ))}
           </View>
-        ) : (
-          <>
-            <Text style={styles.label}>{t('resourceEditor.fieldTitle')}</Text>
-            <TextInput
-              style={styles.input}
-              value={title}
-              onChangeText={setTitle}
-              placeholder={t('resourceEditor.titlePlaceholder')}
-              placeholderTextColor="#94A3B8"
-            />
 
-            <Text style={styles.label}>{t('resourceEditor.fieldType')}</Text>
-            <View style={styles.typeRow}>
-              {types.map((item) => (
-                <TouchableOpacity
-                  key={item}
-                  style={[styles.typeChip, type === item && styles.typeChipActive]}
-                  onPress={() => setType(item)}>
-                  <Text style={[styles.typeText, type === item && styles.typeTextActive]}>
-                    {t(`resources.filter${item.charAt(0).toUpperCase()}${item.slice(1)}`)}
-                  </Text>
-                </TouchableOpacity>
-              ))}
-            </View>
-
-            <Text style={styles.label}>{type === 'file' ? t('resourceEditor.fileUrlLabel') : t('resourceEditor.contentLabel')}</Text>
-            {type === 'file' ? (
-              <>
-                <TouchableOpacity
-                  style={[styles.pickBtn, filePicking && styles.saveBtnDisabled]}
-                  onPress={() => void onPickFileFromPhone()}
-                  disabled={filePicking}>
-                  {filePicking ? (
-                    <ActivityIndicator color={colors.primary} />
-                  ) : (
-                    <Text style={styles.pickBtnText}>{t('resourceEditor.pickFileButton')}</Text>
-                  )}
-                </TouchableOpacity>
-                <TextInput
-                  style={styles.input}
-                  value={fileUrl}
-                  onChangeText={setFileUrl}
-                  placeholder={t('resourceEditor.fileUrlPlaceholder')}
-                  placeholderTextColor="#94A3B8"
-                />
-              </>
-            ) : (
-              <View style={styles.editorCard}>
-                <View style={styles.editorToolsHead}>
-                  <Text style={styles.editorToolsLabel}>{t('resourceEditor.toolsLabel')}</Text>
-                  <Text style={styles.editorStats}>
-                    {t('resourceEditor.characters', { count: content.length })}
-                    {' · '}
-                    {t('resourceEditor.words', { count: content.trim() ? content.trim().split(/\s+/).length : 0 })}
-                  </Text>
-                </View>
-
-                <View style={styles.editorToolsRow}>
-                  <TouchableOpacity style={styles.editorToolBtn} onPress={() => void onCopyAll()}>
-                    <Ionicons name="copy-outline" size={14} color={colors.text} />
-                    <Text style={styles.editorToolText}>{t('resourceEditor.copyAllButton')}</Text>
-                  </TouchableOpacity>
-
-                  <TouchableOpacity style={styles.editorToolBtn} onPress={() => void onPrintText()}>
-                    <Ionicons name="print-outline" size={14} color={colors.text} />
-                    <Text style={styles.editorToolText}>{t('resourceEditor.printButton')}</Text>
-                  </TouchableOpacity>
-
-                  <TouchableOpacity style={styles.editorToolBtn} onPress={onUndoContent} disabled={undoStack.length === 0}>
-                    <Ionicons name="arrow-undo-outline" size={14} color={undoStack.length ? colors.text : colors.textMuted} />
-                    <Text style={[styles.editorToolText, !undoStack.length && styles.editorToolTextDisabled]}>
-                      {t('resourceEditor.undoButton')}
-                    </Text>
-                  </TouchableOpacity>
-                </View>
-
-                <View style={styles.editorToolsRow}>
-                  <TouchableOpacity
-                    style={styles.editorToolBtn}
-                    onPress={() => void onAiSummarize()}
-                    disabled={aiLoading}>
-                    {aiLoading ? (
-                      <ActivityIndicator size="small" color={colors.primary} />
-                    ) : (
-                      <Ionicons name="sparkles-outline" size={14} color={colors.primary} />
-                    )}
-                    <Text style={[styles.editorToolText, { color: colors.primary }]}>
-                      {t('resourceEditor.aiSummarizeButton')}
-                    </Text>
-                  </TouchableOpacity>
-
-                  <TouchableOpacity style={styles.editorToolBtn} onPress={onInsertBullet}>
-                    <Ionicons name="list-outline" size={14} color={colors.text} />
-                    <Text style={styles.editorToolText}>{t('resourceEditor.bulletButton')}</Text>
-                  </TouchableOpacity>
-
-                  <TouchableOpacity style={styles.editorToolBtn} onPress={onInsertNumbered}>
-                    <Ionicons name="reorder-three-outline" size={14} color={colors.text} />
-                    <Text style={styles.editorToolText}>{t('resourceEditor.numberedButton')}</Text>
-                  </TouchableOpacity>
-
-                  <TouchableOpacity style={styles.editorToolBtn} onPress={onInsertQuote}>
-                    <Ionicons name="chatbox-ellipses-outline" size={14} color={colors.text} />
-                    <Text style={styles.editorToolText}>{t('resourceEditor.quoteButton')}</Text>
-                  </TouchableOpacity>
-
-                  <TouchableOpacity style={styles.editorToolBtn} onPress={onInsertDate}>
-                    <Ionicons name="time-outline" size={14} color={colors.text} />
-                    <Text style={styles.editorToolText}>{t('resourceEditor.dateButton')}</Text>
-                  </TouchableOpacity>
-
-                  <TouchableOpacity style={styles.editorToolBtn} onPress={onClearContent}>
-                    <Ionicons name="trash-outline" size={14} color={colors.danger} />
-                    <Text style={[styles.editorToolText, { color: colors.danger }]}>{t('resourceEditor.clearButton')}</Text>
-                  </TouchableOpacity>
-                </View>
-
-                <TextInput
-                  style={[styles.input, styles.textArea, styles.editorInput]}
-                  value={content}
-                  onChangeText={updateContentWithHistory}
-                  placeholder={type === 'link' ? t('resourceEditor.linkPlaceholder') : t('resourceEditor.notePlaceholder')}
-                  placeholderTextColor="#94A3B8"
-                  multiline
-                  textAlignVertical="top"
-                />
+          <Text style={styles.label}>{type === 'file' ? t('resourceEditor.fileUrlLabel') : t('resourceEditor.contentLabel')}</Text>
+          {type === 'file' ? (
+            <>
+              <TouchableOpacity
+                style={[styles.pickBtn, filePicking && styles.saveBtnDisabled]}
+                onPress={() => void onPickFileFromPhone()}
+                disabled={filePicking}>
+                {filePicking ? (
+                  <ActivityIndicator color={colors.primary} />
+                ) : (
+                  <Text style={styles.pickBtnText}>{t('resourceEditor.pickFileButton')}</Text>
+                )}
+              </TouchableOpacity>
+              <TextInput
+                style={styles.input}
+                value={fileUrl}
+                onChangeText={setFileUrl}
+                placeholder={t('resourceEditor.fileUrlPlaceholder')}
+                placeholderTextColor="#94A3B8"
+              />
+            </>
+          ) : (
+            <View style={styles.editorCard}>
+              <View style={styles.editorToolsHead}>
+                <Text style={styles.editorToolsLabel}>{t('resourceEditor.toolsLabel')}</Text>
+                <Text style={styles.editorStats}>
+                  {t('resourceEditor.characters', { count: content.length })}
+                  {' · '}
+                  {t('resourceEditor.words', { count: content.trim() ? content.trim().split(/\s+/).length : 0 })}
+                </Text>
               </View>
-            )}
 
-            <Text style={styles.label}>{t('resourceEditor.fieldTags')}</Text>
-            <TextInput
-              style={styles.input}
-              value={tags}
-              onChangeText={setTags}
-              placeholder={t('resourceEditor.tagsPlaceholder')}
-              placeholderTextColor="#94A3B8"
-            />
+              <View style={styles.editorToolsRow}>
+                <TouchableOpacity style={styles.editorToolBtn} onPress={() => void onCopyAll()}>
+                  <Ionicons name="copy-outline" size={14} color={colors.text} />
+                  <Text style={styles.editorToolText}>{t('resourceEditor.copyAllButton')}</Text>
+                </TouchableOpacity>
 
-            {error ? <Text style={styles.errorText}>{error}</Text> : null}
+                <TouchableOpacity style={styles.editorToolBtn} onPress={() => void onPrintText()}>
+                  <Ionicons name="print-outline" size={14} color={colors.text} />
+                  <Text style={styles.editorToolText}>{t('resourceEditor.printButton')}</Text>
+                </TouchableOpacity>
 
-            <TouchableOpacity
-              style={[styles.saveBtn, (!title.trim() || loading) && styles.saveBtnDisabled]}
-              onPress={() => void onSave()}
-              disabled={!title.trim() || loading}>
-              {loading ? <ActivityIndicator color="#FFFFFF" /> : <Text style={styles.saveBtnText}>{t('common.add')}</Text>}
-            </TouchableOpacity>
-          </>
-        )}
+                <TouchableOpacity style={styles.editorToolBtn} onPress={onUndoContent} disabled={undoStack.length === 0}>
+                  <Ionicons name="arrow-undo-outline" size={14} color={undoStack.length ? colors.text : colors.textMuted} />
+                  <Text style={[styles.editorToolText, !undoStack.length && styles.editorToolTextDisabled]}>
+                    {t('resourceEditor.undoButton')}
+                  </Text>
+                </TouchableOpacity>
+              </View>
+
+              <View style={styles.editorToolsRow}>
+                <TouchableOpacity
+                  style={styles.editorToolBtn}
+                  onPress={() => void onAiSummarize()}
+                  disabled={aiLoading}>
+                  {aiLoading ? (
+                    <ActivityIndicator size="small" color={colors.primary} />
+                  ) : (
+                    <Ionicons name="sparkles-outline" size={14} color={colors.primary} />
+                  )}
+                  <Text style={[styles.editorToolText, { color: colors.primary }]}>
+                    {t('resourceEditor.aiSummarizeButton')}
+                  </Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity style={styles.editorToolBtn} onPress={onInsertBullet}>
+                  <Ionicons name="list-outline" size={14} color={colors.text} />
+                  <Text style={styles.editorToolText}>{t('resourceEditor.bulletButton')}</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity style={styles.editorToolBtn} onPress={onInsertNumbered}>
+                  <Ionicons name="reorder-three-outline" size={14} color={colors.text} />
+                  <Text style={styles.editorToolText}>{t('resourceEditor.numberedButton')}</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity style={styles.editorToolBtn} onPress={onInsertQuote}>
+                  <Ionicons name="chatbox-ellipses-outline" size={14} color={colors.text} />
+                  <Text style={styles.editorToolText}>{t('resourceEditor.quoteButton')}</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity style={styles.editorToolBtn} onPress={onInsertDate}>
+                  <Ionicons name="time-outline" size={14} color={colors.text} />
+                  <Text style={styles.editorToolText}>{t('resourceEditor.dateButton')}</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity style={styles.editorToolBtn} onPress={onClearContent}>
+                  <Ionicons name="trash-outline" size={14} color={colors.danger} />
+                  <Text style={[styles.editorToolText, { color: colors.danger }]}>{t('resourceEditor.clearButton')}</Text>
+                </TouchableOpacity>
+              </View>
+
+              <TextInput
+                style={[styles.input, styles.textArea, styles.editorInput]}
+                value={content}
+                onChangeText={updateContentWithHistory}
+                placeholder={type === 'link' ? t('resourceEditor.linkPlaceholder') : t('resourceEditor.notePlaceholder')}
+                placeholderTextColor="#94A3B8"
+                multiline
+                textAlignVertical="top"
+              />
+            </View>
+          )}
+
+          <Text style={styles.label}>{t('resourceEditor.fieldTags')}</Text>
+          <TextInput
+            style={styles.input}
+            value={tags}
+            onChangeText={setTags}
+            placeholder={t('resourceEditor.tagsPlaceholder')}
+            placeholderTextColor="#94A3B8"
+          />
+
+          {error ? <Text style={styles.errorText}>{error}</Text> : null}
+
+          <TouchableOpacity
+            style={[styles.saveBtn, (!title.trim() || loading) && styles.saveBtnDisabled]}
+            onPress={() => void onSave()}
+            disabled={!title.trim() || loading}>
+            {loading ? <ActivityIndicator color="#FFFFFF" /> : <Text style={styles.saveBtnText}>{t('common.add')}</Text>}
+          </TouchableOpacity>
+        </>
       </ScrollView>
 
       {toastMessage ? <Toast message={toastMessage} /> : null}

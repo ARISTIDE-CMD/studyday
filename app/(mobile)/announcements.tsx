@@ -1,7 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
 import { router } from 'expo-router';
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useMemo, useRef, useState } from 'react';
 import { RefreshControl, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 
 import { StateBlock } from '@/components/ui/state-block';
@@ -20,12 +20,16 @@ export default function AnnouncementsScreen() {
   const [error, setError] = useState('');
   const [refreshing, setRefreshing] = useState(false);
   const [announcements, setAnnouncements] = useState<Announcement[]>([]);
+  const hasHydratedRef = useRef(false);
 
   const styles = useMemo(() => createStyles(colors, cardShadow), [cardShadow, colors]);
 
   const loadAnnouncements = useCallback(async () => {
+    const shouldShowBlockingLoader = !hasHydratedRef.current;
     try {
-      setLoading(true);
+      if (shouldShowBlockingLoader) {
+        setLoading(true);
+      }
       setError('');
       const data = await fetchAnnouncements();
       setAnnouncements(data);
@@ -33,7 +37,10 @@ export default function AnnouncementsScreen() {
       const message = getErrorMessage(err, t('announcements.loadError'));
       setError(message);
     } finally {
-      setLoading(false);
+      if (shouldShowBlockingLoader) {
+        setLoading(false);
+      }
+      hasHydratedRef.current = true;
     }
   }, [t]);
 

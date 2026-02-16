@@ -1,7 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
 import { router } from 'expo-router';
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, Linking, RefreshControl, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import Swipeable from 'react-native-gesture-handler/Swipeable';
 
@@ -46,23 +46,42 @@ export default function ResourcesScreen() {
     resource: Resource;
     timeoutId: ReturnType<typeof setTimeout>;
   } | null>(null);
+  const hasHydratedRef = useRef(false);
+  const swipeRefs = useRef<Record<string, Swipeable | null>>({});
+  const closeAllSwipeables = useCallback((exceptResourceId?: string) => {
+    const entries = Object.entries(swipeRefs.current);
+    for (const [resourceId, instance] of entries) {
+      if (!instance) continue;
+      if (exceptResourceId && resourceId === exceptResourceId) continue;
+      try {
+        instance.close();
+      } catch {
+        // Ignore stale refs.
+      }
+    }
+  }, []);
 
   const styles = useMemo(() => createStyles(colors, cardShadow), [cardShadow, colors]);
 
   const loadResources = useCallback(async () => {
     if (!user?.id) return;
 
+    const shouldShowBlockingLoader = !hasHydratedRef.current;
     let hasCachedData = false;
 
     try {
-      setLoading(true);
+      if (shouldShowBlockingLoader) {
+        setLoading(true);
+      }
       setError('');
 
       const cached = await getCachedResources(user.id);
       hasCachedData = cached.length > 0;
       if (hasCachedData) {
         setResources(cached);
-        setLoading(false);
+        if (shouldShowBlockingLoader) {
+          setLoading(false);
+        }
       }
 
       const data = await fetchResources(user.id);
@@ -73,7 +92,10 @@ export default function ResourcesScreen() {
         setError(message);
       }
     } finally {
-      setLoading(false);
+      if (shouldShowBlockingLoader) {
+        setLoading(false);
+      }
+      hasHydratedRef.current = true;
     }
   }, [t, user?.id]);
 
@@ -85,9 +107,11 @@ export default function ResourcesScreen() {
 
   useFocusEffect(
     useCallback(() => {
+      closeAllSwipeables();
       void loadResources();
       void loadPreferences();
-    }, [loadPreferences, loadResources])
+      return () => closeAllSwipeables();
+    }, [closeAllSwipeables, loadPreferences, loadResources])
   );
 
   const onRefresh = useCallback(async () => {
@@ -232,9 +256,20 @@ export default function ResourcesScreen() {
   const openSelectedResourceEditor = () => {
     if (selectedResourceIds.length !== 1) return;
     const [resourceId] = selectedResourceIds;
+    closeAllSwipeables();
     clearSelection();
-    router.push(`/resource-editor?resourceId=${resourceId}`);
+    router.push(`/resource-editor?resourceId=${resourceId}&returnTo=${encodeURIComponent('/resources')}`);
   };
+
+  const openResourceEditorFromSwipe = useCallback(
+    (resourceId: string) => {
+      closeAllSwipeables();
+      setTimeout(() => {
+        router.push(`/resource-editor?resourceId=${resourceId}&returnTo=${encodeURIComponent('/resources')}`);
+      }, 120);
+    },
+    [closeAllSwipeables]
+  );
 
   const onToggleFavoriteResource = async (resourceId: string) => {
     if (!user?.id) return;
@@ -312,6 +347,7 @@ export default function ResourcesScreen() {
       <ScrollView
         contentContainerStyle={styles.content}
         showsVerticalScrollIndicator={false}
+        onScrollBeginDrag={() => closeAllSwipeables()}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => void onRefresh()} tintColor={colors.primary} />}>
         {isSelectionMode ? (
           <View style={styles.selectionBar}>
@@ -459,8 +495,12 @@ export default function ResourcesScreen() {
                 return (
                   <Swipeable
                     key={resource.id}
+                    ref={(instance) => {
+                      swipeRefs.current[resource.id] = instance;
+                    }}
+                    onSwipeableWillOpen={() => closeAllSwipeables(resource.id)}
                     renderLeftActions={() => <SwipeAction label={t('resources.edit')} color={colors.success} />}
-                    onSwipeableLeftOpen={() => router.push(`/resource-editor?resourceId=${resource.id}`)}
+                    onSwipeableLeftOpen={() => openResourceEditorFromSwipe(resource.id)}
                     renderRightActions={() => <SwipeAction label={t('resources.delete')} color={colors.danger} />}
                     onSwipeableRightOpen={() => scheduleSwipeDeleteResource(resource)}>
                     {card}

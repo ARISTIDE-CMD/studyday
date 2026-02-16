@@ -48,6 +48,7 @@ export default function HomeDashboardScreen() {
   const fabFloat = useRef(new Animated.Value(0)).current;
   const fabMenuProgress = useRef(new Animated.Value(0)).current;
   const fabPressBump = useRef(new Animated.Value(0)).current;
+  const hasHydratedRef = useRef(false);
 
   const displayName = useMemo(() => {
     const fromProfile = profile?.full_name?.trim();
@@ -202,17 +203,22 @@ export default function HomeDashboardScreen() {
   const loadData = useCallback(async () => {
     if (!user?.id) return;
 
+    const shouldShowBlockingLoader = !hasHydratedRef.current;
     let hasCachedData = false;
 
     try {
-      setLoading(true);
+      if (shouldShowBlockingLoader) {
+        setLoading(true);
+      }
       setError('');
 
       const cached = await getCachedDashboardSummary(user.id);
       hasCachedData = cached.tasks.length > 0 || cached.latestResources.length > 0 || cached.latestAnnouncement !== null;
       if (hasCachedData) {
         applySummary(cached);
-        setLoading(false);
+        if (shouldShowBlockingLoader) {
+          setLoading(false);
+        }
       }
 
       const summary = await fetchDashboardSummary(user.id);
@@ -223,7 +229,10 @@ export default function HomeDashboardScreen() {
         setError(message);
       }
     } finally {
-      setLoading(false);
+      if (shouldShowBlockingLoader) {
+        setLoading(false);
+      }
+      hasHydratedRef.current = true;
     }
   }, [applySummary, t, user?.id]);
 

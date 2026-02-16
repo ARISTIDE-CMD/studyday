@@ -1,8 +1,8 @@
 import { Ionicons } from '@expo/vector-icons';
 import { Image } from 'expo-image';
 import * as ImagePicker from 'expo-image-picker';
-import { router } from 'expo-router';
-import React, { useMemo, useState } from 'react';
+import { router, useLocalSearchParams } from 'expo-router';
+import React, { useCallback, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   KeyboardAvoidingView,
@@ -15,11 +15,11 @@ import {
   View,
 } from 'react-native';
 
-import { Toast } from '@/components/ui/toast';
 import { useAppTheme } from '@/hooks/use-app-theme';
 import { useI18n } from '@/hooks/use-i18n';
 import { getErrorMessage } from '@/lib/errors';
 import { useAuth } from '@/providers/auth-provider';
+import { useInAppNotification } from '@/providers/notification-provider';
 import { useOfflineSyncStatus } from '@/providers/offline-sync-provider';
 
 function normalize(value: string): string {
@@ -36,9 +36,11 @@ function extractFirstName(email: string | null | undefined, fallback: string): s
 
 export default function ProfileEditorScreen() {
   const { user, profile, saveProfileLocalFirst } = useAuth();
+  const { showNotification } = useInAppNotification();
   const { triggerSync } = useOfflineSyncStatus();
   const { colors, cardShadow } = useAppTheme();
   const { t } = useI18n();
+  const { returnTo } = useLocalSearchParams<{ returnTo?: string }>();
 
   const initialName = useMemo(() => {
     const nameFromProfile = profile?.full_name?.trim();
@@ -62,8 +64,24 @@ export default function ProfileEditorScreen() {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const [avatarPicking, setAvatarPicking] = useState(false);
-  const [showToast, setShowToast] = useState(false);
   const styles = useMemo(() => createStyles(colors, cardShadow), [cardShadow, colors]);
+  const returnPath = useMemo(() => {
+    if (!returnTo || typeof returnTo !== 'string') return null;
+    try {
+      const decoded = decodeURIComponent(returnTo);
+      return decoded.startsWith('/') ? decoded : null;
+    } catch {
+      return null;
+    }
+  }, [returnTo]);
+
+  const closeEditor = useCallback(() => {
+    if (returnPath) {
+      router.replace(returnPath as '/');
+      return;
+    }
+    router.back();
+  }, [returnPath]);
 
   const hasAvatar = !!normalize(avatarUrl) && !imageError;
 
@@ -120,12 +138,13 @@ export default function ProfileEditorScreen() {
       // Local-first: update UI immediately, then sync in background.
       void triggerSync();
 
-      setShowToast(true);
-
-      setTimeout(() => {
-        setShowToast(false);
-        router.back();
-      }, 550);
+      showNotification({
+        title: t('profileEditor.saveSuccess'),
+        message: t('profileEditor.title'),
+        variant: 'success',
+        durationMs: 2200,
+      });
+      closeEditor();
     } catch (err) {
       setError(getErrorMessage(err, t('profileEditor.saveError')));
     } finally {
@@ -137,7 +156,7 @@ export default function ProfileEditorScreen() {
     <KeyboardAvoidingView style={styles.page} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
         <View style={styles.header}>
-          <TouchableOpacity style={styles.iconBtn} onPress={() => router.back()}>
+          <TouchableOpacity style={styles.iconBtn} onPress={closeEditor}>
             <Ionicons name="chevron-back" size={20} color={colors.text} />
           </TouchableOpacity>
           <Text style={styles.title}>{t('profileEditor.title')}</Text>
@@ -201,7 +220,6 @@ export default function ProfileEditorScreen() {
         </TouchableOpacity>
       </ScrollView>
 
-      {showToast ? <Toast message={t('profileEditor.saveSuccess')} /> : null}
     </KeyboardAvoidingView>
   );
 }

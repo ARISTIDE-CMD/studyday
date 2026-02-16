@@ -181,7 +181,11 @@ export default function TaskDetailScreen() {
               )}
             </TouchableOpacity>
 
-            <TouchableOpacity style={styles.editButton} onPress={() => router.push(`/task-editor?taskId=${task.id}`)}>
+            <TouchableOpacity
+              style={styles.editButton}
+              onPress={() =>
+                router.push(`/task-editor?taskId=${task.id}&returnTo=${encodeURIComponent(`/task/${task.id}`)}`)
+              }>
               <Text style={styles.editButtonText}>{t('taskDetail.edit')}</Text>
             </TouchableOpacity>
           </>

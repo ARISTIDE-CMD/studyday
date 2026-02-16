@@ -36,6 +36,7 @@ function RootNavigator() {
       <Stack
         screenOptions={{
           headerShown: false,
+          animation: 'fade',
           contentStyle: { backgroundColor: colors.background },
         }}>
         <Stack.Screen name="index" />
@@ -46,7 +47,7 @@ function RootNavigator() {
           name="task-editor"
           options={{
             presentation: 'fullScreenModal',
-            animation: 'slide_from_bottom',
+            animation: 'fade',
             contentStyle: { backgroundColor: colors.background },
           }}
         />
@@ -54,7 +55,7 @@ function RootNavigator() {
           name="resource-editor"
           options={{
             presentation: 'fullScreenModal',
-            animation: 'slide_from_bottom',
+            animation: 'fade',
             contentStyle: { backgroundColor: colors.background },
           }}
         />
@@ -62,7 +63,7 @@ function RootNavigator() {
           name="profile-editor"
           options={{
             presentation: 'fullScreenModal',
-            animation: 'slide_from_bottom',
+            animation: 'fade',
             contentStyle: { backgroundColor: colors.background },
           }}
         />

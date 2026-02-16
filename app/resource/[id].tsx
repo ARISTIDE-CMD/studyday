@@ -350,7 +350,9 @@ export default function ResourceDetailScreen() {
 
             <TouchableOpacity
               style={styles.editButton}
-              onPress={() => router.push(`/resource-editor?resourceId=${resource.id}`)}>
+              onPress={() =>
+                router.push(`/resource-editor?resourceId=${resource.id}&returnTo=${encodeURIComponent(`/resource/${resource.id}`)}`)
+              }>
               <Text style={styles.editButtonText}>{t('resourceDetail.edit')}</Text>
             </TouchableOpacity>
 

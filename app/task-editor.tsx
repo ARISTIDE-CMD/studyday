@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import { router, useLocalSearchParams } from 'expo-router';
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   KeyboardAvoidingView,
@@ -78,11 +78,11 @@ function buildCalendarCells(monthDate: Date): CalendarCell[] {
 
 export default function TaskEditorScreen() {
   const { user } = useAuth();
-  const { addActivityNotification } = useInAppNotification();
+  const { addActivityNotification, showNotification } = useInAppNotification();
   const isOnline = useConnectivity();
   const { colors } = useAppTheme();
   const { t, locale } = useI18n();
-  const { taskId } = useLocalSearchParams<{ taskId?: string }>();
+  const { taskId, returnTo } = useLocalSearchParams<{ taskId?: string; returnTo?: string }>();
 
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
@@ -96,7 +96,6 @@ export default function TaskEditorScreen() {
   const [isPersistent, setIsPersistent] = useState(false);
   const [loading, setLoading] = useState(false);
   const [aiLoading, setAiLoading] = useState(false);
-  const [screenLoading, setScreenLoading] = useState(false);
   const [error, setError] = useState('');
   const [toastMessage, setToastMessage] = useState('');
   const styles = useMemo(() => createStyles(colors), [colors]);
@@ -114,6 +113,23 @@ export default function TaskEditorScreen() {
     [locale]
   );
   const calendarCells = useMemo(() => buildCalendarCells(calendarMonth), [calendarMonth]);
+  const returnPath = useMemo(() => {
+    if (!returnTo || typeof returnTo !== 'string') return null;
+    try {
+      const decoded = decodeURIComponent(returnTo);
+      return decoded.startsWith('/') ? decoded : null;
+    } catch {
+      return null;
+    }
+  }, [returnTo]);
+
+  const closeEditor = useCallback(() => {
+    if (returnPath) {
+      router.replace(returnPath as '/');
+      return;
+    }
+    router.back();
+  }, [returnPath]);
 
   useEffect(() => {
     const run = async () => {
@@ -136,20 +152,16 @@ export default function TaskEditorScreen() {
       };
 
       try {
-        setScreenLoading(true);
         const cached = await getCachedTaskById(user.id, taskId);
         if (cached) {
           applyTask(cached);
-          setScreenLoading(false);
         }
 
         const data = await fetchTaskById(user.id, taskId);
         if (!data) return;
 
         applyTask(data);
-      } finally {
-        setScreenLoading(false);
-      }
+      } finally {}
     };
 
     void run();
@@ -200,11 +212,13 @@ export default function TaskEditorScreen() {
         }
       }
 
-      setToastMessage(t('taskEditor.saveSuccess'));
-      setTimeout(() => {
-        setToastMessage('');
-        router.back();
-      }, 900);
+      showNotification({
+        title: t('taskEditor.saveSuccess'),
+        message: taskId ? t('taskEditor.editTitle') : t('taskEditor.createTitle'),
+        variant: 'success',
+        durationMs: 2200,
+      });
+      closeEditor();
     } catch (err) {
       const message = getErrorMessage(err, t('taskEditor.saveError'));
       setError(message);
@@ -250,99 +264,90 @@ export default function TaskEditorScreen() {
     <KeyboardAvoidingView style={styles.page} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
         <View style={styles.header}>
-          <TouchableOpacity style={styles.iconBtn} onPress={() => router.back()}>
+          <TouchableOpacity style={styles.iconBtn} onPress={closeEditor}>
             <Ionicons name="chevron-back" size={20} color={colors.text} />
           </TouchableOpacity>
           <Text style={styles.title}>{taskId ? t('taskEditor.editTitle') : t('taskEditor.createTitle')}</Text>
           <View style={styles.iconBtn} />
         </View>
+        <Text style={styles.label}>{t('taskEditor.fieldTitle')}</Text>
+        <TextInput
+          style={styles.input}
+          value={title}
+          onChangeText={setTitle}
+          placeholder={t('taskEditor.titlePlaceholder')}
+          placeholderTextColor="#94A3B8"
+        />
 
-        {screenLoading ? (
-          <View style={styles.screenLoadingWrap}>
-            <ActivityIndicator color={colors.primary} />
-          </View>
-        ) : (
-          <>
-            <Text style={styles.label}>{t('taskEditor.fieldTitle')}</Text>
-            <TextInput
-              style={styles.input}
-              value={title}
-              onChangeText={setTitle}
-              placeholder={t('taskEditor.titlePlaceholder')}
-              placeholderTextColor="#94A3B8"
-            />
+        <Text style={styles.label}>{t('taskEditor.fieldDescription')}</Text>
+        <TextInput
+          style={[styles.input, styles.textArea]}
+          value={description}
+          onChangeText={setDescription}
+          placeholder={t('taskEditor.descriptionPlaceholder')}
+          placeholderTextColor="#94A3B8"
+          multiline
+          textAlignVertical="top"
+        />
 
-            <Text style={styles.label}>{t('taskEditor.fieldDescription')}</Text>
-            <TextInput
-              style={[styles.input, styles.textArea]}
-              value={description}
-              onChangeText={setDescription}
-              placeholder={t('taskEditor.descriptionPlaceholder')}
-              placeholderTextColor="#94A3B8"
-              multiline
-              textAlignVertical="top"
-            />
+        <TouchableOpacity
+          style={[styles.aiActionBtn, aiLoading && styles.saveBtnDisabled]}
+          onPress={() => void onAiBreakdown()}
+          disabled={aiLoading}>
+          {aiLoading ? (
+            <ActivityIndicator size="small" color={colors.primary} />
+          ) : (
+            <>
+              <Ionicons name="sparkles-outline" size={15} color={colors.primary} />
+              <Text style={styles.aiActionText}>{t('taskEditor.aiBreakdownButton')}</Text>
+            </>
+          )}
+        </TouchableOpacity>
 
+        <Text style={styles.label}>{t('taskEditor.fieldDueDate')}</Text>
+        <TouchableOpacity style={styles.datePickerBtn} onPress={openCalendar}>
+          <Ionicons name="calendar-outline" size={18} color={colors.primary} />
+          <Text style={styles.datePickerText}>
+            {formatDateLabel(dueDate, locale, t('common.noDate'))}
+          </Text>
+          <Ionicons name="chevron-forward" size={16} color={colors.textMuted} />
+        </TouchableOpacity>
+
+        <Text style={styles.label}>{t('taskEditor.fieldPriority')}</Text>
+        <View style={styles.priorityRow}>
+          {priorities.map((item) => (
             <TouchableOpacity
-              style={[styles.aiActionBtn, aiLoading && styles.saveBtnDisabled]}
-              onPress={() => void onAiBreakdown()}
-              disabled={aiLoading}>
-              {aiLoading ? (
-                <ActivityIndicator size="small" color={colors.primary} />
-              ) : (
-                <>
-                  <Ionicons name="sparkles-outline" size={15} color={colors.primary} />
-                  <Text style={styles.aiActionText}>{t('taskEditor.aiBreakdownButton')}</Text>
-                </>
-              )}
-            </TouchableOpacity>
-
-            <Text style={styles.label}>{t('taskEditor.fieldDueDate')}</Text>
-            <TouchableOpacity style={styles.datePickerBtn} onPress={openCalendar}>
-              <Ionicons name="calendar-outline" size={18} color={colors.primary} />
-              <Text style={styles.datePickerText}>
-                {formatDateLabel(dueDate, locale, t('common.noDate'))}
+              key={item}
+              style={[styles.priorityChip, priority === item && styles.priorityChipActive]}
+              onPress={() => setPriority(item)}>
+              <Text style={[styles.priorityText, priority === item && styles.priorityTextActive]}>
+                {t(`priority.${item}`)}
               </Text>
-              <Ionicons name="chevron-forward" size={16} color={colors.textMuted} />
             </TouchableOpacity>
+          ))}
+        </View>
 
-            <Text style={styles.label}>{t('taskEditor.fieldPriority')}</Text>
-            <View style={styles.priorityRow}>
-              {priorities.map((item) => (
-                <TouchableOpacity
-                  key={item}
-                  style={[styles.priorityChip, priority === item && styles.priorityChipActive]}
-                  onPress={() => setPriority(item)}>
-                  <Text style={[styles.priorityText, priority === item && styles.priorityTextActive]}>
-                    {t(`priority.${item}`)}
-                  </Text>
-                </TouchableOpacity>
-              ))}
-            </View>
+        <View style={styles.persistentRow}>
+          <View style={styles.persistentTextWrap}>
+            <Text style={styles.persistentLabel}>{t('taskEditor.fieldPersistent')}</Text>
+            <Text style={styles.persistentHelp}>{t('taskEditor.persistentHelp')}</Text>
+          </View>
+          <Switch
+            value={isPersistent}
+            onValueChange={setIsPersistent}
+            trackColor={{ false: colors.border, true: colors.primarySoft }}
+            thumbColor={isPersistent ? colors.primary : '#FFFFFF'}
+          />
+        </View>
 
-            <View style={styles.persistentRow}>
-              <View style={styles.persistentTextWrap}>
-                <Text style={styles.persistentLabel}>{t('taskEditor.fieldPersistent')}</Text>
-                <Text style={styles.persistentHelp}>{t('taskEditor.persistentHelp')}</Text>
-              </View>
-              <Switch
-                value={isPersistent}
-                onValueChange={setIsPersistent}
-                trackColor={{ false: colors.border, true: colors.primarySoft }}
-                thumbColor={isPersistent ? colors.primary : '#FFFFFF'}
-              />
-            </View>
+        {error ? <Text style={styles.errorText}>{error}</Text> : null}
 
-            {error ? <Text style={styles.errorText}>{error}</Text> : null}
-
-            <TouchableOpacity
-              style={[styles.saveBtn, (!title.trim() || loading) && styles.saveBtnDisabled]}
-              onPress={() => void onSave()}
-              disabled={!title.trim() || loading}>
-              {loading ? <ActivityIndicator color="#FFFFFF" /> : <Text style={styles.saveBtnText}>{t('common.save')}</Text>}
-            </TouchableOpacity>
-          </>
-        )}
+        <TouchableOpacity
+          style={[styles.saveBtn, (!title.trim() || loading) && styles.saveBtnDisabled]}
+          onPress={() => void onSave()}
+          disabled={!title.trim() || loading}>
+          {loading ? <ActivityIndicator color="#FFFFFF" /> : <Text style={styles.saveBtnText}>{t('common.save')}</Text>}
+        </TouchableOpacity>
       </ScrollView>
 
       <Modal visible={calendarVisible} transparent animationType="fade" onRequestClose={() => setCalendarVisible(false)}>

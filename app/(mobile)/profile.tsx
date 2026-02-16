@@ -163,6 +163,7 @@ export default function ProfileScreen() {
   const [preferencesOpen, setPreferencesOpen] = useState(false);
   const [securityOpen, setSecurityOpen] = useState(false);
   const avatarPulse = React.useRef(new Animated.Value(0)).current;
+  const hasHydratedRef = React.useRef(false);
   const registrationDate = profile?.created_at ?? user?.created_at ?? null;
   const avatarUrl = profile?.avatar_url?.trim()
     || (typeof user?.user_metadata?.avatar_url === 'string' ? user.user_metadata.avatar_url.trim() : '');
@@ -226,8 +227,11 @@ export default function ProfileScreen() {
   const loadStats = useCallback(async () => {
     if (!user?.id) return;
 
+    const shouldShowBlockingLoader = !hasHydratedRef.current;
     try {
-      setLoading(true);
+      if (shouldShowBlockingLoader) {
+        setLoading(true);
+      }
       setStatsError('');
 
       const [cachedStats, cachedTasks] = await Promise.all([
@@ -260,7 +264,9 @@ export default function ProfileScreen() {
 
       setWeekDoneTasks(cachedWeekDone);
       setStreakDays(computeStreakDays(cachedDoneDates));
-      setLoading(false);
+      if (shouldShowBlockingLoader) {
+        setLoading(false);
+      }
 
       const [stats, remoteTasks] = await Promise.all([
         fetchTaskStats(user.id),
@@ -290,7 +296,10 @@ export default function ProfileScreen() {
     } catch (error) {
       setStatsError(getErrorMessage(error, t('profile.statsError')));
     } finally {
-      setLoading(false);
+      if (shouldShowBlockingLoader) {
+        setLoading(false);
+      }
+      hasHydratedRef.current = true;
     }
   }, [t, user?.id]);
 
@@ -444,7 +453,9 @@ export default function ProfileScreen() {
           </>
         )}
 
-        <TouchableOpacity style={themedStyles.primaryAction} onPress={() => router.push('/profile-editor')}>
+        <TouchableOpacity
+          style={themedStyles.primaryAction}
+          onPress={() => router.push(`/profile-editor?returnTo=${encodeURIComponent('/profile')}`)}>
           <Text style={themedStyles.primaryActionText}>{t('profile.editProfile')}</Text>
         </TouchableOpacity>
 
