@@ -9,7 +9,7 @@ import {
   setLocalSchedules,
   upsertLocalSchedule,
 } from '@/lib/offline-store';
-import { isLikelyNetworkError, shouldAutoSync, syncPendingOperations } from '@/lib/sync-engine';
+import { isLikelyNetworkError } from '@/lib/sync-engine';
 import { supabase } from '@/lib/supabase';
 import type { Resource, Task } from '@/types/supabase';
 import type {
@@ -23,6 +23,9 @@ import type {
 
 const DAY_ORDER: StudyDayKey[] = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'];
 const SLOT_ORDER: StudySlot[] = ['morning', 'afternoon', 'evening'];
+type RemoteReadOptions = {
+  remote?: boolean;
+};
 
 function nowIso(): string {
   return new Date().toISOString();
@@ -284,19 +287,6 @@ function normalizePlanFromDb(value: unknown): StudySchedulePlan | null {
   };
 }
 
-async function trySyncSilently(userId?: string): Promise<void> {
-  if (!userId) return;
-
-  const autoSyncEnabled = await shouldAutoSync();
-  if (!autoSyncEnabled) return;
-
-  try {
-    await syncPendingOperations(userId);
-  } catch {
-    // Keep local-first behavior.
-  }
-}
-
 export function getDefaultStudySchedulePreferences(today = new Date()): StudySchedulePreferences {
   const startDate = toIsoDate(today);
   const periodPreset: StudyPeriodPreset = 'trimester';
@@ -319,10 +309,11 @@ export async function getCachedStudySchedulePlans(userId: string): Promise<Study
   return sortPlans(await getLocalSchedules(userId));
 }
 
-export async function getStudySchedulePlans(userId: string): Promise<StudySchedulePlan[]> {
+export async function getStudySchedulePlans(userId: string, options: RemoteReadOptions = {}): Promise<StudySchedulePlan[]> {
   const localPlans = await getLocalSchedules(userId);
-
-  await trySyncSilently(userId);
+  if (!options.remote) {
+    return sortPlans(localPlans);
+  }
 
   const { data, error } = await supabase
     .from('study_schedules')
@@ -357,10 +348,15 @@ export async function getLatestStudySchedulePlan(userId: string): Promise<StudyS
   return remote[0] ?? null;
 }
 
-export async function getStudySchedulePlanById(userId: string, scheduleId: string): Promise<StudySchedulePlan | null> {
+export async function getStudySchedulePlanById(
+  userId: string,
+  scheduleId: string,
+  options: RemoteReadOptions = {}
+): Promise<StudySchedulePlan | null> {
   const local = await getLocalScheduleById(userId, scheduleId);
-
-  await trySyncSilently(userId);
+  if (!options.remote) {
+    return local;
+  }
 
   const { data, error } = await supabase
     .from('study_schedules')
@@ -434,8 +430,6 @@ export async function generateAndSaveStudySchedule(input: GenerateInput): Promis
     record: plan,
     createdAt: now,
   });
-
-  void trySyncSilently(input.userId);
   return plan;
 }
 
@@ -458,8 +452,6 @@ export async function togglePinStudySchedulePlan(scheduleId: string, userId: str
     record: next,
     createdAt: next.updated_at,
   });
-
-  void trySyncSilently(userId);
 }
 
 export async function deleteStudySchedulePlan(scheduleId: string, userId: string): Promise<void> {
@@ -473,6 +465,8 @@ export async function deleteStudySchedulePlan(scheduleId: string, userId: string
     recordId: scheduleId,
     createdAt: now,
   });
+}
 
-  void trySyncSilently(userId);
+export async function hydrateStudySchedulesFromRemote(userId: string): Promise<void> {
+  await getStudySchedulePlans(userId, { remote: true });
 }

@@ -19,7 +19,7 @@ import { useAppTheme } from '@/hooks/use-app-theme';
 import { useI18n } from '@/hooks/use-i18n';
 import { getErrorMessage } from '@/lib/errors';
 import { formatDateLabel, toIsoDate } from '@/lib/format';
-import { fetchResources, fetchTasks, getCachedResources, getCachedTasks } from '@/lib/student-api';
+import { getCachedResources, getCachedTasks } from '@/lib/student-api';
 import {
   deleteStudySchedulePlan,
   generateAndSaveStudySchedule,
@@ -149,17 +149,11 @@ export default function SchedulePlannerScreen() {
         setPreferences(latestPlan.preferences);
       }
 
-      const remoteSchedules = await getStudySchedulePlans(user.id);
-      setHistory(remoteSchedules);
-      if (!latestPlan && remoteSchedules[0]) {
-        setPlan(remoteSchedules[0]);
-        setPreferences(remoteSchedules[0].preferences);
-      }
-
-      if (isOnline) {
-        const [remoteTasks, remoteResources] = await Promise.all([fetchTasks(user.id), fetchResources(user.id)]);
-        setTasks(remoteTasks);
-        setResources(remoteResources);
+      const refreshedSchedules = await getStudySchedulePlans(user.id);
+      setHistory(refreshedSchedules);
+      if (!latestPlan && refreshedSchedules[0]) {
+        setPlan(refreshedSchedules[0]);
+        setPreferences(refreshedSchedules[0].preferences);
       }
     } catch (err) {
       setError(getErrorMessage(err, t('schedulePlanner.loadError')));

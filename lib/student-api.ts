@@ -19,7 +19,7 @@ import {
   upsertLocalResource,
   upsertLocalTask,
 } from '@/lib/offline-store';
-import { isLikelyNetworkError, shouldAutoSync, syncPendingOperations } from '@/lib/sync-engine';
+import { isLikelyNetworkError } from '@/lib/sync-engine';
 import { supabase } from '@/lib/supabase';
 import type { Announcement, Resource, Task } from '@/types/supabase';
 
@@ -28,6 +28,9 @@ const ARCHIVE_RETENTION_MS = 24 * 60 * 60 * 1000;
 const taskSelectFields =
   'id, user_id, title, description, status, priority, due_date, completed_at, is_persistent, created_at';
 const legacyTaskSelectFields = 'id, user_id, title, description, status, priority, due_date, created_at';
+type RemoteReadOptions = {
+  remote?: boolean;
+};
 
 function isMissingTaskArchiveColumnError(error: unknown): boolean {
   if (!error || typeof error !== 'object') return false;
@@ -168,27 +171,13 @@ function mergeById<T extends { id: string }>(remote: T[], local: T[]): T[] {
   return [...map.values()];
 }
 
-async function trySyncSilently(userId?: string) {
-  if (!userId) {
-    return;
-  }
-
-  const autoSyncEnabled = await shouldAutoSync();
-  if (!autoSyncEnabled) {
-    return;
-  }
-
-  try {
-    await syncPendingOperations(userId);
-  } catch {
-    // Keep local-first behavior if sync fails.
-  }
-}
-
-export async function fetchTasks(userId: string) {
+export async function fetchTasks(userId: string, options: RemoteReadOptions = {}) {
   const localTasks = await getNormalizedLocalTasks(userId);
 
-  await trySyncSilently(userId);
+  if (!options.remote) {
+    return sortTasks(localTasks);
+  }
+
   await purgeExpiredRemoteArchivedTasks(userId);
 
   const { data, error } = await supabase
@@ -251,10 +240,12 @@ export async function fetchTasks(userId: string) {
   return next;
 }
 
-export async function fetchTaskById(userId: string, taskId: string) {
+export async function fetchTaskById(userId: string, taskId: string, options: RemoteReadOptions = {}) {
   const localTask = await getLocalTaskById(userId, taskId);
 
-  await trySyncSilently(userId);
+  if (!options.remote) {
+    return localTask;
+  }
 
   const { data, error } = await supabase
     .from('tasks')
@@ -328,8 +319,6 @@ export async function createTask(input: {
     record: task,
     createdAt: now,
   });
-
-  void trySyncSilently(input.userId);
   return task;
 }
 
@@ -374,8 +363,6 @@ export async function updateTask(taskId: string, userId: string, patch: Partial<
     record: next,
     createdAt: now,
   });
-
-  void trySyncSilently(userId);
 }
 
 export async function deleteTask(taskId: string, userId: string) {
@@ -389,14 +376,14 @@ export async function deleteTask(taskId: string, userId: string) {
     recordId: taskId,
     createdAt: now,
   });
-
-  void trySyncSilently(userId);
 }
 
-export async function fetchResources(userId: string) {
+export async function fetchResources(userId: string, options: RemoteReadOptions = {}) {
   const localResources = await getLocalResources(userId);
 
-  await trySyncSilently(userId);
+  if (!options.remote) {
+    return sortResources(localResources);
+  }
 
   const { data, error } = await supabase
     .from('resources')
@@ -427,10 +414,12 @@ export async function fetchResources(userId: string) {
   return next;
 }
 
-export async function fetchResourceById(userId: string, resourceId: string) {
+export async function fetchResourceById(userId: string, resourceId: string, options: RemoteReadOptions = {}) {
   const localResource = await getLocalResourceById(userId, resourceId);
 
-  await trySyncSilently(userId);
+  if (!options.remote) {
+    return localResource;
+  }
 
   const { data, error } = await supabase
     .from('resources')
@@ -492,8 +481,6 @@ export async function createResource(input: {
     record: resource,
     createdAt: now,
   });
-
-  void trySyncSilently(input.userId);
   return resource;
 }
 
@@ -536,8 +523,6 @@ export async function updateResource(resourceId: string, userId: string, patch: 
     record: next,
     createdAt: now,
   });
-
-  void trySyncSilently(userId);
 }
 
 export async function deleteResource(resourceId: string, userId: string) {
@@ -551,12 +536,13 @@ export async function deleteResource(resourceId: string, userId: string) {
     recordId: resourceId,
     createdAt: now,
   });
-
-  void trySyncSilently(userId);
 }
 
-export async function fetchAnnouncements() {
+export async function fetchAnnouncements(options: RemoteReadOptions = {}) {
   const localAnnouncements = await getCachedAnnouncements();
+  if (!options.remote) {
+    return localAnnouncements;
+  }
 
   const { data, error } = await supabase
     .from('announcements')
@@ -581,9 +567,12 @@ export async function fetchAnnouncements() {
   return next;
 }
 
-export async function fetchAnnouncementById(id: string) {
+export async function fetchAnnouncementById(id: string, options: RemoteReadOptions = {}) {
   const cached = await getCachedAnnouncements();
   const localMatch = cached.find((announcement) => announcement.id === id) ?? null;
+  if (!options.remote) {
+    return localMatch;
+  }
 
   const { data, error } = await supabase
     .from('announcements')
@@ -603,10 +592,10 @@ export async function fetchAnnouncementById(id: string) {
   return data;
 }
 
-export async function fetchDashboardSummary(userId: string) {
-  const tasks = await fetchTasks(userId);
-  const resources = await fetchResources(userId);
-  const announcements = await fetchAnnouncements();
+export async function fetchDashboardSummary(userId: string, options: RemoteReadOptions = {}) {
+  const tasks = await fetchTasks(userId, options);
+  const resources = await fetchResources(userId, options);
+  const announcements = await fetchAnnouncements(options);
 
   const todoTasks = tasks.filter((task) => task.status !== 'done');
   const overdue = todoTasks.filter((task) => (task.due_date ? task.due_date < todayIso() : false));
@@ -641,9 +630,9 @@ export async function getCachedDashboardSummary(userId: string) {
   };
 }
 
-export async function fetchTaskStats(userId: string) {
+export async function fetchTaskStats(userId: string, options: RemoteReadOptions = {}) {
   try {
-    const tasks = await fetchTasks(userId);
+    const tasks = await fetchTasks(userId, options);
     return {
       total: tasks.length,
       done: tasks.filter((task) => task.status === 'done').length,
@@ -651,4 +640,12 @@ export async function fetchTaskStats(userId: string) {
   } catch (error) {
     throw new Error(getErrorMessage(error, 'Impossible de lire les statistiques.'));
   }
+}
+
+export async function hydrateLocalDataFromRemote(userId: string): Promise<void> {
+  await Promise.all([
+    fetchTasks(userId, { remote: true }),
+    fetchResources(userId, { remote: true }),
+    fetchAnnouncements({ remote: true }),
+  ]);
 }

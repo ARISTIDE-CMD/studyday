@@ -8,7 +8,9 @@ import {
   Animated,
   Easing,
   LayoutAnimation,
+  Modal,
   Platform,
+  Pressable,
   ScrollView,
   StyleSheet,
   Switch,
@@ -148,7 +150,7 @@ export default function ProfileScreen() {
   const { user, profile, refreshProfile, signOut } = useAuth();
   const isOnline = useConnectivity();
   const { language, themeMode, syncMode, setLanguage, setThemeMode, setSyncMode, settingsLoading } = useSettings();
-  const { isSyncing, triggerSync } = useOfflineSyncStatus();
+  const { isSyncing, pendingOperations, triggerSync } = useOfflineSyncStatus();
   const { colors, cardShadow } = useAppTheme();
   const { t, locale } = useI18n();
   const [loading, setLoading] = useState(true);
@@ -162,6 +164,8 @@ export default function ProfileScreen() {
   const [statsError, setStatsError] = useState('');
   const [preferencesOpen, setPreferencesOpen] = useState(false);
   const [securityOpen, setSecurityOpen] = useState(false);
+  const [signOutModalVisible, setSignOutModalVisible] = useState(false);
+  const [signOutAction, setSignOutAction] = useState<'continue' | 'sync' | null>(null);
   const avatarPulse = React.useRef(new Animated.Value(0)).current;
   const hasHydratedRef = React.useRef(false);
   const registrationDate = profile?.created_at ?? user?.created_at ?? null;
@@ -313,6 +317,35 @@ export default function ProfileScreen() {
   const onSignOut = async () => {
     await signOut();
     router.replace('/onboarding');
+  };
+
+  const onRequestSignOut = () => {
+    if (pendingOperations > 0) {
+      setSignOutModalVisible(true);
+      return;
+    }
+    void onSignOut();
+  };
+
+  const onSignOutWithoutSync = async () => {
+    setSignOutAction('continue');
+    try {
+      await onSignOut();
+    } finally {
+      setSignOutAction(null);
+      setSignOutModalVisible(false);
+    }
+  };
+
+  const onSyncThenSignOut = async () => {
+    setSignOutAction('sync');
+    try {
+      await triggerSync();
+      await onSignOut();
+    } catch {
+      setStatsError(t('profile.syncBeforeSignOutError'));
+      setSignOutAction(null);
+    }
   };
 
   const togglePreferences = () => {
@@ -550,7 +583,7 @@ export default function ProfileScreen() {
 
           {securityOpen ? (
             <View style={themedStyles.accordionBody}>
-              <TouchableOpacity style={themedStyles.dangerAction} onPress={() => void onSignOut()}>
+              <TouchableOpacity style={themedStyles.dangerAction} onPress={onRequestSignOut}>
                 <Text style={themedStyles.dangerActionText}>{t('profile.signOut')}</Text>
               </TouchableOpacity>
 
@@ -573,6 +606,56 @@ export default function ProfileScreen() {
           <Text style={themedStyles.privacyText}>{t('profile.privacyDescription')}</Text>
         </View>
       </ScrollView>
+
+      <Modal
+        visible={signOutModalVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => {
+          if (!signOutAction) setSignOutModalVisible(false);
+        }}>
+        <Pressable
+          style={themedStyles.signOutModalOverlay}
+          onPress={() => {
+            if (!signOutAction) setSignOutModalVisible(false);
+          }}>
+          <Pressable style={themedStyles.signOutModalCard} onPress={(event) => event.stopPropagation()}>
+            <TouchableOpacity
+              style={themedStyles.signOutModalClose}
+              onPress={() => setSignOutModalVisible(false)}
+              disabled={Boolean(signOutAction)}>
+              <Ionicons name="close" size={18} color={colors.textMuted} />
+            </TouchableOpacity>
+
+            <Text style={themedStyles.signOutModalTitle}>{t('profile.syncBeforeSignOutTitle')}</Text>
+            <Text style={themedStyles.signOutModalBody}>
+              {t('profile.syncBeforeSignOutDescription', { count: pendingOperations })}
+            </Text>
+
+            <TouchableOpacity
+              style={[themedStyles.signOutContinueBtn, Boolean(signOutAction) && themedStyles.signOutModalBtnDisabled]}
+              onPress={() => void onSignOutWithoutSync()}
+              disabled={Boolean(signOutAction)}>
+              {signOutAction === 'continue' ? (
+                <ActivityIndicator size="small" color={colors.text} />
+              ) : (
+                <Text style={themedStyles.signOutContinueText}>{t('profile.signOutContinue')}</Text>
+              )}
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[themedStyles.signOutSyncBtn, Boolean(signOutAction) && themedStyles.signOutModalBtnDisabled]}
+              onPress={() => void onSyncThenSignOut()}
+              disabled={Boolean(signOutAction)}>
+              {signOutAction === 'sync' ? (
+                <ActivityIndicator size="small" color="#FFFFFF" />
+              ) : (
+                <Text style={themedStyles.signOutSyncText}>{t('profile.signOutSyncFirst')}</Text>
+              )}
+            </TouchableOpacity>
+          </Pressable>
+        </Pressable>
+      </Modal>
     </View>
     </TabSwipeShell>
   );
@@ -955,5 +1038,72 @@ const createStyles = (
     },
     badgeChipTextLocked: {
       color: colors.textMuted,
+    },
+    signOutModalOverlay: {
+      flex: 1,
+      backgroundColor: 'rgba(2, 6, 23, 0.45)',
+      alignItems: 'center',
+      justifyContent: 'center',
+      paddingHorizontal: 18,
+    },
+    signOutModalCard: {
+      width: '100%',
+      borderRadius: 16,
+      borderWidth: 1,
+      borderColor: colors.border,
+      backgroundColor: colors.surface,
+      padding: 16,
+      ...cardShadow,
+    },
+    signOutModalClose: {
+      width: 28,
+      height: 28,
+      borderRadius: 14,
+      alignItems: 'center',
+      justifyContent: 'center',
+      alignSelf: 'flex-end',
+      marginBottom: 6,
+    },
+    signOutModalTitle: {
+      color: colors.text,
+      fontSize: 17,
+      fontWeight: '800',
+      marginBottom: 8,
+    },
+    signOutModalBody: {
+      color: colors.textMuted,
+      fontSize: 13,
+      lineHeight: 19,
+      marginBottom: 16,
+    },
+    signOutContinueBtn: {
+      minHeight: 44,
+      borderRadius: 10,
+      borderWidth: 1,
+      borderColor: colors.border,
+      backgroundColor: colors.background,
+      alignItems: 'center',
+      justifyContent: 'center',
+      marginBottom: 8,
+    },
+    signOutContinueText: {
+      color: colors.text,
+      fontWeight: '700',
+      fontSize: 13,
+    },
+    signOutSyncBtn: {
+      minHeight: 46,
+      borderRadius: 10,
+      backgroundColor: colors.primary,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    signOutSyncText: {
+      color: '#FFFFFF',
+      fontWeight: '700',
+      fontSize: 13,
+    },
+    signOutModalBtnDisabled: {
+      opacity: 0.7,
     },
   });

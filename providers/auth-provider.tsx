@@ -9,6 +9,8 @@ import {
   removeLocalProfile,
   setLocalProfile,
 } from '@/lib/offline-store';
+import { hydrateLocalDataFromRemote } from '@/lib/student-api';
+import { hydrateStudySchedulesFromRemote } from '@/lib/study-schedule';
 import { supabase } from '@/lib/supabase';
 import type { Profile } from '@/types/supabase';
 
@@ -18,7 +20,7 @@ type AuthContextValue = {
   profile: Profile | null;
   shouldShowPostLoginIntro: boolean;
   loading: boolean;
-  refreshProfile: () => Promise<void>;
+  refreshProfile: (options?: { remote?: boolean }) => Promise<void>;
   saveProfileLocalFirst: (patch: { full_name?: string | null; avatar_url?: string | null }) => Promise<void>;
   queuePostLoginIntro: () => void;
   consumePostLoginIntro: () => void;
@@ -128,7 +130,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     return operations.some((operation) => operation.entity === 'profile' && operation.action === 'upsert');
   }, []);
 
-  const refreshProfile = useCallback(async () => {
+  const refreshProfile = useCallback(async (options?: { remote?: boolean }) => {
     if (!session?.user) {
       setProfile(null);
       return;
@@ -137,6 +139,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const cached = await getLocalProfileById(session.user.id);
     if (cached) {
       setProfile(cached);
+    }
+
+    if (!options?.remote) {
+      return;
     }
 
     try {
@@ -223,6 +229,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         } catch {
           if (active && !cachedProfile) setProfile(null);
         }
+
+        void Promise.all([
+          hydrateLocalDataFromRemote(data.session.user.id),
+          hydrateStudySchedulesFromRemote(data.session.user.id),
+        ]).catch(() => {
+          // Keep cached experience if remote hydration fails.
+        });
       } else {
         setProfile(null);
       }
@@ -234,13 +247,26 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     const {
       data: { subscription },
-    } = supabase.auth.onAuthStateChange((_event, nextSession) => {
+    } = supabase.auth.onAuthStateChange((event, nextSession) => {
       setSession(nextSession);
 
       if (!nextSession?.user) {
         setProfile(null);
         setShouldShowPostLoginIntro(false);
         setLoading(false);
+        return;
+      }
+
+      const shouldHydrateRemote = event === 'SIGNED_IN' || event === 'USER_UPDATED';
+
+      if (!shouldHydrateRemote) {
+        void (async () => {
+          const cachedProfile = await getLocalProfileById(nextSession.user.id);
+          if (active && cachedProfile) {
+            setProfile(cachedProfile);
+          }
+          if (active) setLoading(false);
+        })();
         return;
       }
 
@@ -266,6 +292,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         } catch {
           if (active && !cachedProfile) setProfile(null);
         } finally {
+          void Promise.all([
+            hydrateLocalDataFromRemote(nextSession.user.id),
+            hydrateStudySchedulesFromRemote(nextSession.user.id),
+          ]).catch(() => {
+            // Keep cached experience if remote hydration fails.
+          });
+
           if (active) setLoading(false);
         }
       })();

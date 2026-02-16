@@ -20,7 +20,6 @@ import { useI18n } from '@/hooks/use-i18n';
 import { getErrorMessage } from '@/lib/errors';
 import { useAuth } from '@/providers/auth-provider';
 import { useInAppNotification } from '@/providers/notification-provider';
-import { useOfflineSyncStatus } from '@/providers/offline-sync-provider';
 
 function normalize(value: string): string {
   return value.trim();
@@ -37,7 +36,6 @@ function extractFirstName(email: string | null | undefined, fallback: string): s
 export default function ProfileEditorScreen() {
   const { user, profile, saveProfileLocalFirst } = useAuth();
   const { showNotification } = useInAppNotification();
-  const { triggerSync } = useOfflineSyncStatus();
   const { colors, cardShadow } = useAppTheme();
   const { t } = useI18n();
   const { returnTo } = useLocalSearchParams<{ returnTo?: string }>();
@@ -134,9 +132,6 @@ export default function ProfileEditorScreen() {
         full_name: nextName,
         avatar_url: nextAvatarUrl || null,
       });
-
-      // Local-first: update UI immediately, then sync in background.
-      void triggerSync();
 
       showNotification({
         title: t('profileEditor.saveSuccess'),

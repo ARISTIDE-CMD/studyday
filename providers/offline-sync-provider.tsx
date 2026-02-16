@@ -2,6 +2,8 @@ import React, { createContext, useCallback, useContext, useEffect, useMemo, useR
 import { AppState } from 'react-native';
 
 import { getOutboxSize } from '@/lib/offline-store';
+import { hydrateLocalDataFromRemote } from '@/lib/student-api';
+import { hydrateStudySchedulesFromRemote } from '@/lib/study-schedule';
 import { syncPendingOperations } from '@/lib/sync-engine';
 import { useAuth } from '@/providers/auth-provider';
 import { useSettings } from '@/providers/settings-provider';
@@ -28,7 +30,7 @@ const OfflineSyncContext = createContext<OfflineSyncContextValue>({
 });
 
 export function OfflineSyncProvider({ children }: { children: React.ReactNode }) {
-  const { session } = useAuth();
+  const { session, refreshProfile } = useAuth();
   const { syncMode } = useSettings();
   const [pendingOperations, setPendingOperations] = useState(0);
   const [isSyncing, setIsSyncing] = useState(false);
@@ -59,6 +61,11 @@ export function OfflineSyncProvider({ children }: { children: React.ReactNode })
 
     try {
       const result = await syncPendingOperations(userId);
+      await Promise.all([
+        hydrateLocalDataFromRemote(userId),
+        hydrateStudySchedulesFromRemote(userId),
+        refreshProfile({ remote: true }),
+      ]);
       setLastSyncStatus('success');
       setLastSyncedCount(result.syncedCount);
     } catch {
@@ -70,7 +77,7 @@ export function OfflineSyncProvider({ children }: { children: React.ReactNode })
       setLastSyncAt(new Date().toISOString());
       await refreshPending();
     }
-  }, [refreshPending, userId]);
+  }, [refreshPending, refreshProfile, userId]);
 
   const triggerSync = useCallback(async () => {
     await runSync();
