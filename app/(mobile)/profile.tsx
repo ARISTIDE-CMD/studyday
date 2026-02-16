@@ -452,6 +452,10 @@ export default function ProfileScreen() {
           <Text style={themedStyles.secondaryActionText}>{t('profile.focusMode')}</Text>
         </TouchableOpacity>
 
+        <TouchableOpacity style={themedStyles.secondaryAction} onPress={() => router.push('/ai-toolbox')}>
+          <Text style={themedStyles.secondaryActionText}>{t('profile.aiToolbox')}</Text>
+        </TouchableOpacity>
+
         <View style={themedStyles.accordionCard}>
           <TouchableOpacity style={themedStyles.accordionHeader} onPress={togglePreferences}>
             <View style={themedStyles.accordionHeadMain}>

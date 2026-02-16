@@ -333,6 +333,21 @@ export async function createTask(input: {
   return task;
 }
 
+export async function duplicateTask(input: {
+  userId: string;
+  source: Task;
+  title: string;
+}) {
+  return createTask({
+    userId: input.userId,
+    title: input.title,
+    description: input.source.description ?? undefined,
+    dueDate: input.source.due_date ?? undefined,
+    priority: input.source.priority,
+    isPersistent: input.source.is_persistent,
+  });
+}
+
 export async function updateTask(taskId: string, userId: string, patch: Partial<Task>) {
   const localCurrent = await getLocalTaskById(userId, taskId);
   const now = new Date().toISOString();
@@ -480,6 +495,21 @@ export async function createResource(input: {
 
   void trySyncSilently(input.userId);
   return resource;
+}
+
+export async function duplicateResource(input: {
+  userId: string;
+  source: Resource;
+  title: string;
+}) {
+  return createResource({
+    userId: input.userId,
+    title: input.title,
+    type: input.source.type === 'link' || input.source.type === 'file' ? input.source.type : 'note',
+    content: input.source.content ?? undefined,
+    fileUrl: input.source.file_url ?? undefined,
+    tags: input.source.tags ?? [],
+  });
 }
 
 export async function updateResource(resourceId: string, userId: string, patch: Partial<Resource>) {

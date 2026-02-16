@@ -1,4 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
+import * as Clipboard from 'expo-clipboard';
 import { Image } from 'expo-image';
 import { router, useLocalSearchParams } from 'expo-router';
 import React, { useEffect, useMemo, useState } from 'react';
@@ -22,8 +23,9 @@ import { getErrorMessage } from '@/lib/errors';
 import { formatDateLabel } from '@/lib/format';
 import { resolveResourceIconKind } from '@/lib/resource-icon';
 import { getResourceExternalUrl } from '@/lib/resource-open';
-import { fetchResourceById, getCachedResourceById } from '@/lib/student-api';
+import { duplicateResource, fetchResourceById, getCachedResourceById } from '@/lib/student-api';
 import { useAuth } from '@/providers/auth-provider';
+import { useInAppNotification } from '@/providers/notification-provider';
 import type { Resource } from '@/types/supabase';
 
 function getResourceTypeLabel(t: ReturnType<typeof useI18n>['t'], type: Resource['type']) {
@@ -37,12 +39,15 @@ export default function ResourceDetailScreen() {
   const { colors } = useAppTheme();
   const { t, locale } = useI18n();
   const { user } = useAuth();
+  const { showNotification, addActivityNotification } = useInAppNotification();
   const { id } = useLocalSearchParams<{ id: string }>();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [resource, setResource] = useState<Resource | null>(null);
   const [previewLoading, setPreviewLoading] = useState(false);
   const [openingExternal, setOpeningExternal] = useState(false);
+  const [copyingLink, setCopyingLink] = useState(false);
+  const [duplicating, setDuplicating] = useState(false);
   const styles = useMemo(() => createStyles(colors), [colors]);
 
   useEffect(() => {
@@ -122,6 +127,70 @@ export default function ResourceDetailScreen() {
       });
     } catch {
       Alert.alert(t('common.genericError'), t('resourceDetail.shareError'));
+    }
+  };
+
+  const onCopyLink = async () => {
+    if (!externalUrl || copyingLink) {
+      Alert.alert(t('common.genericError'), t('resourceDetail.noUrl'));
+      return;
+    }
+
+    setCopyingLink(true);
+    try {
+      await Clipboard.setStringAsync(externalUrl);
+      showNotification({
+        title: t('resourceDetail.copyLink'),
+        message: t('resourceDetail.copyLinkSuccess'),
+        variant: 'success',
+      });
+    } catch {
+      showNotification({
+        title: t('common.genericError'),
+        message: t('resourceDetail.copyLinkError'),
+        variant: 'warning',
+      });
+    } finally {
+      setCopyingLink(false);
+    }
+  };
+
+  const onDuplicate = async () => {
+    if (!resource || !user?.id || duplicating) return;
+
+    setDuplicating(true);
+    try {
+      const createdResource = await duplicateResource({
+        userId: user.id,
+        source: resource,
+        title: t('resourceDetail.duplicateTitle', { title: resource.title }),
+      });
+
+      try {
+        await addActivityNotification({
+          entityType: 'resource',
+          entityId: createdResource.id,
+          title: t('activityNotifications.resourceCreatedTitle'),
+          message: t('activityNotifications.resourceCreatedMessage', { title: createdResource.title }),
+        });
+      } catch {
+        // Keep duplication flow even if notification persistence fails.
+      }
+
+      showNotification({
+        title: t('activityNotifications.resourceCreatedTitle'),
+        message: t('resourceDetail.duplicateSuccess'),
+        variant: 'success',
+      });
+      router.replace(`/resource/${createdResource.id}`);
+    } catch {
+      showNotification({
+        title: t('common.genericError'),
+        message: t('resourceDetail.duplicateError'),
+        variant: 'warning',
+      });
+    } finally {
+      setDuplicating(false);
     }
   };
 
@@ -230,11 +299,39 @@ export default function ResourceDetailScreen() {
                 </TouchableOpacity>
 
                 <TouchableOpacity
-                  style={[styles.shareButton, openingExternal && styles.actionDisabled]}
+                  style={[styles.shareButton, (openingExternal || duplicating || copyingLink) && styles.actionDisabled]}
                   onPress={() => void onShare()}
-                  disabled={openingExternal}>
+                  disabled={openingExternal || duplicating || copyingLink}>
                   <Ionicons name="share-social-outline" size={16} color={colors.text} />
                   <Text style={styles.shareButtonText}>{t('resourceDetail.share')}</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={[styles.shareButton, (!externalUrl || copyingLink || openingExternal || duplicating) && styles.actionDisabled]}
+                  onPress={() => void onCopyLink()}
+                  disabled={!externalUrl || copyingLink || openingExternal || duplicating}>
+                  {copyingLink ? (
+                    <ActivityIndicator size="small" color={colors.text} />
+                  ) : (
+                    <>
+                      <Ionicons name="copy-outline" size={16} color={colors.text} />
+                      <Text style={styles.shareButtonText}>{t('resourceDetail.copyLink')}</Text>
+                    </>
+                  )}
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={[styles.shareButton, (duplicating || openingExternal || copyingLink) && styles.actionDisabled]}
+                  onPress={() => void onDuplicate()}
+                  disabled={duplicating || openingExternal || copyingLink}>
+                  {duplicating ? (
+                    <ActivityIndicator size="small" color={colors.text} />
+                  ) : (
+                    <>
+                      <Ionicons name="duplicate-outline" size={16} color={colors.text} />
+                      <Text style={styles.shareButtonText}>{t('resourceDetail.duplicate')}</Text>
+                    </>
+                  )}
                 </TouchableOpacity>
               </View>
             ) : (

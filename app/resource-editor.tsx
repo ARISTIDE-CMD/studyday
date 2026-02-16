@@ -21,6 +21,7 @@ import {
 import { Toast } from '@/components/ui/toast';
 import { useAppTheme } from '@/hooks/use-app-theme';
 import { useI18n } from '@/hooks/use-i18n';
+import { summarizeText } from '@/lib/ai-assistant';
 import { getErrorMessage } from '@/lib/errors';
 import {
   createResource,
@@ -77,6 +78,7 @@ export default function ResourceEditorScreen() {
   const [screenLoading, setScreenLoading] = useState(false);
   const [loading, setLoading] = useState(false);
   const [filePicking, setFilePicking] = useState(false);
+  const [aiLoading, setAiLoading] = useState(false);
   const [error, setError] = useState('');
   const [toastMessage, setToastMessage] = useState('');
   const [undoStack, setUndoStack] = useState<string[]>([]);
@@ -280,6 +282,29 @@ export default function ResourceEditorScreen() {
     pushToast(t('resourceEditor.clearSuccess'));
   };
 
+  const onAiSummarize = async () => {
+    const current = content.trim();
+    if (!current) {
+      setError(t('resourceEditor.emptyText'));
+      return;
+    }
+
+    setError('');
+    setAiLoading(true);
+    try {
+      const summarized = await summarizeText({
+        text: current,
+        locale,
+      });
+      updateContentWithHistory(summarized);
+      pushToast(t('resourceEditor.aiSummarySuccess'));
+    } catch (err) {
+      setError(getErrorMessage(err, t('resourceEditor.aiSummaryError')));
+    } finally {
+      setAiLoading(false);
+    }
+  };
+
   const onCopyAll = async () => {
     const text = content.trim();
     if (!text) {
@@ -420,6 +445,20 @@ export default function ResourceEditorScreen() {
                 </View>
 
                 <View style={styles.editorToolsRow}>
+                  <TouchableOpacity
+                    style={styles.editorToolBtn}
+                    onPress={() => void onAiSummarize()}
+                    disabled={aiLoading}>
+                    {aiLoading ? (
+                      <ActivityIndicator size="small" color={colors.primary} />
+                    ) : (
+                      <Ionicons name="sparkles-outline" size={14} color={colors.primary} />
+                    )}
+                    <Text style={[styles.editorToolText, { color: colors.primary }]}>
+                      {t('resourceEditor.aiSummarizeButton')}
+                    </Text>
+                  </TouchableOpacity>
+
                   <TouchableOpacity style={styles.editorToolBtn} onPress={onInsertBullet}>
                     <Ionicons name="list-outline" size={14} color={colors.text} />
                     <Text style={styles.editorToolText}>{t('resourceEditor.bulletButton')}</Text>

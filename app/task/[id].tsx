@@ -7,19 +7,22 @@ import { StateBlock } from '@/components/ui/state-block';
 import { useAppTheme } from '@/hooks/use-app-theme';
 import { useI18n } from '@/hooks/use-i18n';
 import { getErrorMessage } from '@/lib/errors';
-import { fetchTaskById, getCachedTaskById } from '@/lib/student-api';
+import { duplicateTask, fetchTaskById, getCachedTaskById } from '@/lib/student-api';
 import { formatDateLabel } from '@/lib/format';
 import { useAuth } from '@/providers/auth-provider';
+import { useInAppNotification } from '@/providers/notification-provider';
 import type { Task } from '@/types/supabase';
 
 export default function TaskDetailScreen() {
   const { colors } = useAppTheme();
   const { t, locale } = useI18n();
   const { user } = useAuth();
+  const { showNotification, addActivityNotification } = useInAppNotification();
   const { id } = useLocalSearchParams<{ id: string }>();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [task, setTask] = useState<Task | null>(null);
+  const [duplicating, setDuplicating] = useState(false);
   const styles = useMemo(() => createStyles(colors), [colors]);
 
   useEffect(() => {
@@ -62,6 +65,45 @@ export default function TaskDetailScreen() {
     if (task.status === 'in_progress') return t('taskDetail.statusInProgress');
     return t('taskDetail.statusTodo');
   }, [t, task]);
+
+  const onDuplicate = async () => {
+    if (!user?.id || !task || duplicating) return;
+
+    setDuplicating(true);
+    try {
+      const createdTask = await duplicateTask({
+        userId: user.id,
+        source: task,
+        title: t('taskDetail.duplicateTitle', { title: task.title }),
+      });
+
+      try {
+        await addActivityNotification({
+          entityType: 'task',
+          entityId: createdTask.id,
+          title: t('activityNotifications.taskCreatedTitle'),
+          message: t('activityNotifications.taskCreatedMessage', { title: createdTask.title }),
+        });
+      } catch {
+        // Keep duplication flow even if notification persistence fails.
+      }
+
+      showNotification({
+        title: t('activityNotifications.taskCreatedTitle'),
+        message: t('taskDetail.duplicateSuccess'),
+        variant: 'success',
+      });
+      router.replace(`/task/${createdTask.id}`);
+    } catch {
+      showNotification({
+        title: t('common.genericError'),
+        message: t('taskDetail.duplicateError'),
+        variant: 'warning',
+      });
+    } finally {
+      setDuplicating(false);
+    }
+  };
 
   return (
     <View style={styles.page}>
@@ -123,6 +165,20 @@ export default function TaskDetailScreen() {
 
             <TouchableOpacity style={styles.focusButton} onPress={() => router.push(`/focus?taskId=${task.id}`)}>
               <Text style={styles.focusButtonText}>{t('taskDetail.focus')}</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[styles.duplicateButton, duplicating && styles.actionDisabled]}
+              onPress={() => void onDuplicate()}
+              disabled={duplicating}>
+              {duplicating ? (
+                <ActivityIndicator size="small" color={colors.text} />
+              ) : (
+                <>
+                  <Ionicons name="copy-outline" size={16} color={colors.text} />
+                  <Text style={styles.duplicateButtonText}>{t('taskDetail.duplicate')}</Text>
+                </>
+              )}
             </TouchableOpacity>
 
             <TouchableOpacity style={styles.editButton} onPress={() => router.push(`/task-editor?taskId=${task.id}`)}>
@@ -219,6 +275,9 @@ const createStyles = (colors: ReturnType<typeof useAppTheme>['colors']) =>
       color: '#FFFFFF',
       fontWeight: '700',
     },
+    actionDisabled: {
+      opacity: 0.75,
+    },
     focusButton: {
       alignSelf: 'flex-start',
       borderRadius: 10,
@@ -229,6 +288,23 @@ const createStyles = (colors: ReturnType<typeof useAppTheme>['colors']) =>
       paddingVertical: 10,
     },
     focusButtonText: {
+      color: colors.text,
+      fontWeight: '700',
+    },
+    duplicateButton: {
+      alignSelf: 'flex-start',
+      borderRadius: 10,
+      borderWidth: 1,
+      borderColor: colors.border,
+      backgroundColor: colors.surface,
+      paddingHorizontal: 14,
+      paddingVertical: 10,
+      marginTop: 8,
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 7,
+    },
+    duplicateButtonText: {
       color: colors.text,
       fontWeight: '700',
     },

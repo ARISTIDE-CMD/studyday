@@ -12,6 +12,7 @@ import {
   View,
 } from 'react-native';
 
+import { GoogleMark } from '@/components/ui/google-mark';
 import { useAppTheme } from '@/hooks/use-app-theme';
 import { useI18n } from '@/hooks/use-i18n';
 import { getErrorMessage } from '@/lib/errors';
@@ -244,7 +245,7 @@ export default function SignupScreen() {
             <ActivityIndicator size="small" color={colors.text} />
           ) : (
             <>
-              <Ionicons name="logo-google" size={18} color={colors.text} />
+              <GoogleMark size={18} />
               <Text style={styles.googleButtonText}>{t('auth.googleSignIn')}</Text>
             </>
           )}
