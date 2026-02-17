@@ -1,6 +1,7 @@
 import * as FileSystem from 'expo-file-system/legacy';
 import { Platform } from 'react-native';
 
+import { decodeOfflinePayload, encodeOfflinePayload } from '@/lib/offline-crypto';
 import type { Announcement, Profile, Resource, Task } from '@/types/supabase';
 import type { StudySchedulePlan } from '@/types/study-schedule';
 
@@ -282,7 +283,9 @@ async function readFromStorage(): Promise<OfflineState> {
     try {
       const raw = globalThis.localStorage?.getItem(STORAGE_KEY);
       if (!raw) return cloneState(defaultState);
-      return ensureStateShape(JSON.parse(raw));
+      const decoded = await decodeOfflinePayload(raw);
+      if (!decoded) return cloneState(defaultState);
+      return ensureStateShape(JSON.parse(decoded));
     } catch {
       return cloneState(defaultState);
     }
@@ -295,16 +298,21 @@ async function readFromStorage(): Promise<OfflineState> {
   try {
     const raw = await FileSystem.readAsStringAsync(FILE_PATH);
     if (!raw) return cloneState(defaultState);
-    return ensureStateShape(JSON.parse(raw));
+    const decoded = await decodeOfflinePayload(raw);
+    if (!decoded) return cloneState(defaultState);
+    return ensureStateShape(JSON.parse(decoded));
   } catch {
     return cloneState(defaultState);
   }
 }
 
 async function writeToStorage(nextState: OfflineState): Promise<void> {
+  const serialized = JSON.stringify(nextState);
+  const encoded = await encodeOfflinePayload(serialized);
+
   if (Platform.OS === 'web') {
     try {
-      globalThis.localStorage?.setItem(STORAGE_KEY, JSON.stringify(nextState));
+      globalThis.localStorage?.setItem(STORAGE_KEY, encoded);
     } catch {
       // Ignore write errors, in-memory state remains available.
     }
@@ -316,7 +324,7 @@ async function writeToStorage(nextState: OfflineState): Promise<void> {
   }
 
   try {
-    await FileSystem.writeAsStringAsync(FILE_PATH, JSON.stringify(nextState));
+    await FileSystem.writeAsStringAsync(FILE_PATH, encoded);
   } catch {
     // Ignore write errors, in-memory state remains available.
   }

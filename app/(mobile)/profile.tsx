@@ -1,5 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
+import * as Clipboard from 'expo-clipboard';
 import { Image } from 'expo-image';
 import { router } from 'expo-router';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
@@ -13,6 +14,7 @@ import {
   StyleSheet,
   Switch,
   Text,
+  TextInput,
   TouchableOpacity,
   View,
 } from 'react-native';
@@ -23,9 +25,21 @@ import { useAppTheme } from '@/hooks/use-app-theme';
 import { useI18n } from '@/hooks/use-i18n';
 import { getErrorMessage } from '@/lib/errors';
 import { getFocusStats } from '@/lib/focus-stats';
-import { formatDateLabel } from '@/lib/format';
-import type { ThemeMode } from '@/lib/settings-storage';
-import { fetchTaskStats, fetchTasks, getCachedTaskStats, getCachedTasks } from '@/lib/student-api';
+import { formatDateTimeLabel } from '@/lib/format';
+import {
+  exportEncryptionKeyBackup,
+  importEncryptionKeyBackup,
+  isEncryptionBackupSupported,
+} from '@/lib/offline-crypto';
+import type { NotificationSoundMode, ThemeMode } from '@/lib/settings-storage';
+import { hydrateStudySchedulesFromRemote } from '@/lib/study-schedule';
+import {
+  fetchTaskStats,
+  fetchTasks,
+  getCachedTaskStats,
+  getCachedTasks,
+  hydrateLocalDataFromRemote,
+} from '@/lib/student-api';
 import { useAuth } from '@/providers/auth-provider';
 import { useOfflineSyncStatus } from '@/providers/offline-sync-provider';
 import { useSettings } from '@/providers/settings-provider';
@@ -146,7 +160,17 @@ function SettingChip({
 export default function ProfileScreen() {
   const { user, profile, refreshProfile, signOut } = useAuth();
   const isOnline = useConnectivity();
-  const { language, themeMode, syncMode, setLanguage, setThemeMode, setSyncMode, settingsLoading } = useSettings();
+  const {
+    language,
+    themeMode,
+    syncMode,
+    notificationSoundMode,
+    setLanguage,
+    setThemeMode,
+    setSyncMode,
+    setNotificationSoundMode,
+    settingsLoading,
+  } = useSettings();
   const { isSyncing, pendingOperations, triggerSync } = useOfflineSyncStatus();
   const { colors, cardShadow } = useAppTheme();
   const { t, locale } = useI18n();
@@ -159,6 +183,11 @@ export default function ProfileScreen() {
   const [settingsModalVisible, setSettingsModalVisible] = useState(false);
   const [signOutModalVisible, setSignOutModalVisible] = useState(false);
   const [signOutAction, setSignOutAction] = useState<'continue' | 'sync' | null>(null);
+  const [backupPassphrase, setBackupPassphrase] = useState('');
+  const [backupPayload, setBackupPayload] = useState('');
+  const [backupAction, setBackupAction] = useState<'export' | 'import' | null>(null);
+  const [backupError, setBackupError] = useState('');
+  const [backupMessage, setBackupMessage] = useState('');
   const avatarPulse = React.useRef(new Animated.Value(0)).current;
   const hasHydratedRef = React.useRef(false);
   const registrationDate = profile?.created_at ?? user?.created_at ?? null;
@@ -298,6 +327,82 @@ export default function ProfileScreen() {
     }
   };
 
+  const onExportKeyBackup = async () => {
+    if (!isEncryptionBackupSupported()) {
+      setBackupError(t('profile.encryptionUnavailable'));
+      setBackupMessage('');
+      return;
+    }
+    if (backupPassphrase.length < 8) {
+      setBackupError(t('profile.encryptionPassphraseRequired'));
+      setBackupMessage('');
+      return;
+    }
+
+    setBackupAction('export');
+    setBackupError('');
+    setBackupMessage('');
+    try {
+      const payload = await exportEncryptionKeyBackup(backupPassphrase);
+      setBackupPayload(payload);
+      await Clipboard.setStringAsync(payload);
+      setBackupMessage(t('profile.encryptionExportSuccess'));
+    } catch (error) {
+      setBackupError(getErrorMessage(error, t('profile.encryptionExportError')));
+    } finally {
+      setBackupAction(null);
+    }
+  };
+
+  const onPasteBackupPayload = async () => {
+    try {
+      const value = await Clipboard.getStringAsync();
+      if (value?.trim()) {
+        setBackupPayload(value.trim());
+        setBackupError('');
+      }
+    } catch {
+      setBackupError(t('profile.encryptionPasteError'));
+    }
+  };
+
+  const onImportKeyBackup = async () => {
+    if (!isEncryptionBackupSupported()) {
+      setBackupError(t('profile.encryptionUnavailable'));
+      setBackupMessage('');
+      return;
+    }
+    if (backupPassphrase.length < 8) {
+      setBackupError(t('profile.encryptionPassphraseRequired'));
+      setBackupMessage('');
+      return;
+    }
+    if (!backupPayload.trim()) {
+      setBackupError(t('profile.encryptionBackupRequired'));
+      setBackupMessage('');
+      return;
+    }
+
+    setBackupAction('import');
+    setBackupError('');
+    setBackupMessage('');
+    try {
+      await importEncryptionKeyBackup(backupPayload.trim(), backupPassphrase);
+      if (user?.id) {
+        await Promise.all([
+          refreshProfile({ remote: true }),
+          hydrateLocalDataFromRemote(user.id),
+          hydrateStudySchedulesFromRemote(user.id),
+        ]);
+      }
+      setBackupMessage(t('profile.encryptionImportSuccess'));
+    } catch (error) {
+      setBackupError(getErrorMessage(error, t('profile.encryptionImportError')));
+    } finally {
+      setBackupAction(null);
+    }
+  };
+
   return (
     <TabSwipeShell tab="profile">
     <View style={themedStyles.page}>
@@ -384,7 +489,9 @@ export default function ProfileScreen() {
             </View>
             <View style={themedStyles.metaRow}>
               <Text style={themedStyles.metaTitle}>{t('profile.registrationDate')}</Text>
-              <Text style={themedStyles.metaValue}>{formatDateLabel(registrationDate, locale, t('common.noDate'))}</Text>
+              <Text style={themedStyles.metaValue}>
+                {formatDateTimeLabel(registrationDate, locale, t('common.noDate'))}
+              </Text>
             </View>
           </View>
         )}
@@ -407,14 +514,17 @@ export default function ProfileScreen() {
         transparent
         animationType="fade"
         onRequestClose={() => setSettingsModalVisible(false)}>
-        <Pressable style={themedStyles.settingsModalOverlay} onPress={() => setSettingsModalVisible(false)}>
+        <View style={themedStyles.settingsModalOverlay}>
           <Pressable style={themedStyles.settingsModalCard} onPress={(event) => event.stopPropagation()}>
             <TouchableOpacity style={themedStyles.settingsModalClose} onPress={() => setSettingsModalVisible(false)}>
               <Ionicons name="close" size={18} color={colors.textMuted} />
             </TouchableOpacity>
             <Text style={themedStyles.settingsModalTitle}>{t('profile.preferences')}</Text>
 
-            <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={themedStyles.settingsModalBody}>
+            <ScrollView
+              showsVerticalScrollIndicator={false}
+              keyboardShouldPersistTaps="handled"
+              contentContainerStyle={themedStyles.settingsModalBody}>
               <Text style={themedStyles.settingsLabel}>{t('profile.language')}</Text>
               <View style={themedStyles.settingRow}>
                 <SettingChip label={t('profile.french')} active={language === 'fr'} onPress={() => setLanguage('fr')} colors={colors} />
@@ -473,6 +583,87 @@ export default function ProfileScreen() {
                 </TouchableOpacity>
               ) : null}
 
+              <Text style={themedStyles.settingsLabel}>{t('profile.notificationSoundTitle')}</Text>
+              <Text style={themedStyles.syncHint}>{t('profile.notificationSoundHint')}</Text>
+              <View style={themedStyles.settingRow}>
+                {(
+                  [
+                    { key: 'device', label: t('profile.notificationSoundDevice') },
+                    { key: 'enhanced', label: t('profile.notificationSoundEnhanced') },
+                    { key: 'off', label: t('profile.notificationSoundOff') },
+                  ] as { key: NotificationSoundMode; label: string }[]
+                ).map((option) => (
+                  <SettingChip
+                    key={option.key}
+                    label={option.label}
+                    active={notificationSoundMode === option.key}
+                    onPress={() => setNotificationSoundMode(option.key)}
+                    colors={colors}
+                  />
+                ))}
+              </View>
+
+              <Text style={themedStyles.settingsLabel}>{t('profile.encryptionTitle')}</Text>
+              <View style={themedStyles.securityCard}>
+                <Text style={themedStyles.securityHint}>{t('profile.encryptionHint')}</Text>
+
+                <Text style={themedStyles.inputLabel}>{t('profile.encryptionPassphraseLabel')}</Text>
+                <TextInput
+                  style={themedStyles.settingsInput}
+                  placeholder={t('profile.encryptionPassphrasePlaceholder')}
+                  placeholderTextColor={colors.textMuted}
+                  secureTextEntry
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  value={backupPassphrase}
+                  onChangeText={setBackupPassphrase}
+                />
+
+                <View style={themedStyles.securityActionsRow}>
+                  <TouchableOpacity
+                    style={[themedStyles.securityActionBtn, Boolean(backupAction) && themedStyles.syncNowBtnDisabled]}
+                    onPress={() => void onExportKeyBackup()}
+                    disabled={Boolean(backupAction)}>
+                    {backupAction === 'export' ? (
+                      <ActivityIndicator size="small" color="#FFFFFF" />
+                    ) : (
+                      <Text style={themedStyles.securityActionBtnText}>{t('profile.encryptionExport')}</Text>
+                    )}
+                  </TouchableOpacity>
+
+                  <TouchableOpacity
+                    style={[themedStyles.securityActionGhostBtn, Boolean(backupAction) && themedStyles.syncNowBtnDisabled]}
+                    onPress={() => void onPasteBackupPayload()}
+                    disabled={Boolean(backupAction)}>
+                    <Text style={themedStyles.securityActionGhostBtnText}>{t('profile.encryptionPaste')}</Text>
+                  </TouchableOpacity>
+                </View>
+
+                <Text style={themedStyles.inputLabel}>{t('profile.encryptionBackupLabel')}</Text>
+                <TextInput
+                  style={[themedStyles.settingsInput, themedStyles.settingsInputMultiline]}
+                  placeholder={t('profile.encryptionBackupPlaceholder')}
+                  placeholderTextColor={colors.textMuted}
+                  multiline
+                  value={backupPayload}
+                  onChangeText={setBackupPayload}
+                />
+
+                <TouchableOpacity
+                  style={[themedStyles.securityActionBtn, Boolean(backupAction) && themedStyles.syncNowBtnDisabled]}
+                  onPress={() => void onImportKeyBackup()}
+                  disabled={Boolean(backupAction)}>
+                  {backupAction === 'import' ? (
+                    <ActivityIndicator size="small" color="#FFFFFF" />
+                  ) : (
+                    <Text style={themedStyles.securityActionBtnText}>{t('profile.encryptionImport')}</Text>
+                  )}
+                </TouchableOpacity>
+
+                {backupError ? <Text style={themedStyles.settingsError}>{backupError}</Text> : null}
+                {backupMessage ? <Text style={themedStyles.settingsSuccess}>{backupMessage}</Text> : null}
+              </View>
+
               <Text style={themedStyles.settingsLabel}>{t('profile.security')}</Text>
               <TouchableOpacity style={themedStyles.dangerAction} onPress={onRequestSignOut}>
                 <Text style={themedStyles.dangerActionText}>{t('profile.signOut')}</Text>
@@ -487,7 +678,7 @@ export default function ProfileScreen() {
               </View>
             </ScrollView>
           </Pressable>
-        </Pressable>
+        </View>
       </Modal>
 
       <Modal
@@ -956,6 +1147,85 @@ const createStyles = (
       fontSize: 12,
       lineHeight: 17,
     },
+    securityHint: {
+      color: colors.textMuted,
+      fontSize: 12,
+      lineHeight: 17,
+    },
+    securityCard: {
+      borderRadius: 12,
+      borderWidth: 1,
+      borderColor: colors.border,
+      backgroundColor: colors.surface,
+      padding: 12,
+      marginBottom: 8,
+      gap: 8,
+    },
+    securityActionsRow: {
+      flexDirection: 'row',
+      gap: 8,
+      alignItems: 'center',
+    },
+    securityActionBtn: {
+      flex: 1,
+      borderRadius: 10,
+      minHeight: 40,
+      alignItems: 'center',
+      justifyContent: 'center',
+      backgroundColor: colors.primary,
+      paddingHorizontal: 10,
+    },
+    securityActionBtnText: {
+      color: '#FFFFFF',
+      fontWeight: '700',
+      fontSize: 12,
+    },
+    securityActionGhostBtn: {
+      borderRadius: 10,
+      minHeight: 40,
+      alignItems: 'center',
+      justifyContent: 'center',
+      borderWidth: 1,
+      borderColor: colors.border,
+      backgroundColor: colors.background,
+      paddingHorizontal: 12,
+    },
+    securityActionGhostBtnText: {
+      color: colors.text,
+      fontWeight: '700',
+      fontSize: 12,
+    },
+    inputLabel: {
+      color: colors.text,
+      fontSize: 12,
+      fontWeight: '700',
+      marginTop: 2,
+    },
+    settingsInput: {
+      borderRadius: 10,
+      borderWidth: 1,
+      borderColor: colors.border,
+      backgroundColor: colors.background,
+      minHeight: 42,
+      paddingHorizontal: 12,
+      paddingVertical: 10,
+      color: colors.text,
+      fontSize: 13,
+    },
+    settingsInputMultiline: {
+      minHeight: 80,
+      textAlignVertical: 'top',
+    },
+    settingsError: {
+      color: colors.danger,
+      fontSize: 12,
+      fontWeight: '600',
+    },
+    settingsSuccess: {
+      color: colors.success,
+      fontSize: 12,
+      fontWeight: '600',
+    },
     syncNowBtn: {
       borderRadius: 10,
       backgroundColor: colors.primary,
@@ -1077,18 +1347,21 @@ const createStyles = (
     settingsModalOverlay: {
       flex: 1,
       backgroundColor: 'rgba(2, 6, 23, 0.45)',
-      alignItems: 'center',
-      justifyContent: 'center',
-      paddingHorizontal: 16,
+      alignItems: 'stretch',
+      justifyContent: 'flex-end',
+      paddingHorizontal: 0,
     },
     settingsModalCard: {
+      flex: 1,
       width: '100%',
-      maxHeight: '84%',
-      borderRadius: 16,
-      borderWidth: 1,
-      borderColor: colors.border,
+      maxHeight: '100%',
+      borderRadius: 0,
+      borderWidth: 0,
+      borderColor: 'transparent',
       backgroundColor: colors.surface,
-      padding: 14,
+      paddingHorizontal: 16,
+      paddingTop: 54,
+      paddingBottom: 18,
       ...cardShadow,
     },
     settingsModalClose: {
@@ -1106,6 +1379,6 @@ const createStyles = (
       marginBottom: 8,
     },
     settingsModalBody: {
-      paddingBottom: 8,
+      paddingBottom: 40,
     },
   });

@@ -20,7 +20,7 @@ import { StateBlock } from '@/components/ui/state-block';
 import { useAppTheme } from '@/hooks/use-app-theme';
 import { useI18n } from '@/hooks/use-i18n';
 import { getErrorMessage } from '@/lib/errors';
-import { formatDateLabel } from '@/lib/format';
+import { formatDateTimeLabel } from '@/lib/format';
 import { resolveResourceIconKind } from '@/lib/resource-icon';
 import { getResourceExternalUrl } from '@/lib/resource-open';
 import { duplicateResource, fetchResourceById, getCachedResourceById } from '@/lib/student-api';
@@ -253,7 +253,9 @@ export default function ResourceDetailScreen() {
 
               <View style={styles.metaRow}>
                 <Text style={styles.metaLabel}>{t('resourceDetail.createdAt')}</Text>
-                <Text style={styles.metaValue}>{formatDateLabel(resource.created_at, locale, t('common.noDate'))}</Text>
+                <Text style={styles.metaValue}>
+                  {formatDateTimeLabel(resource.created_at, locale, t('common.noDate'))}
+                </Text>
               </View>
 
               <View style={styles.metaRow}>

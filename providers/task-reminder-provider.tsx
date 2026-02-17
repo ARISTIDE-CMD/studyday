@@ -1,6 +1,5 @@
 import React, { useEffect, useRef } from 'react';
-import { AppState, Vibration } from 'react-native';
-import * as Haptics from 'expo-haptics';
+import { AppState } from 'react-native';
 
 import { useI18n } from '@/hooks/use-i18n';
 import { getCachedTasks } from '@/lib/student-api';
@@ -9,15 +8,6 @@ import { useAuth } from '@/providers/auth-provider';
 import { useInAppNotification } from '@/providers/notification-provider';
 
 const CHECK_INTERVAL_MS = 12 * 60 * 1000;
-
-async function playReminderCue() {
-  try {
-    await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
-  } catch {
-    // Ignore haptics errors on unsupported devices.
-  }
-  Vibration.vibrate([0, 75, 50, 75]);
-}
 
 export function TaskReminderProvider({ children }: { children: React.ReactNode }) {
   const { user } = useAuth();
@@ -54,7 +44,6 @@ export function TaskReminderProvider({ children }: { children: React.ReactNode }
           variant: 'info',
         });
 
-        await playReminderCue();
       } catch {
         // Keep reminder engine silent on errors.
       } finally {

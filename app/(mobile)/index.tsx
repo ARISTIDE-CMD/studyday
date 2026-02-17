@@ -15,7 +15,7 @@ import { useI18n } from '@/hooks/use-i18n';
 import { loadAppFlags, saveAppFlags } from '@/lib/app-flags';
 import { getErrorMessage } from '@/lib/errors';
 import { fetchDashboardSummary, getCachedDashboardSummary } from '@/lib/student-api';
-import { formatDateLabel, humanNow } from '@/lib/format';
+import { formatDateLabel, formatDateTimeLabel, humanNow } from '@/lib/format';
 import { getUserPreferences, toggleFavoriteResource, toggleFavoriteTask } from '@/lib/user-preferences';
 import { useAuth } from '@/providers/auth-provider';
 import { useInAppNotification } from '@/providers/notification-provider';
@@ -43,6 +43,7 @@ export default function HomeDashboardScreen() {
   const [avatarImageError, setAvatarImageError] = useState(false);
   const [fabMenuOpen, setFabMenuOpen] = useState(false);
   const [fabMenuVisible, setFabMenuVisible] = useState(false);
+  const [nowClock, setNowClock] = useState(() => new Date());
   const avatarPulse = useRef(new Animated.Value(0)).current;
   const dayCardBreath = useRef(new Animated.Value(0)).current;
   const fabFloat = useRef(new Animated.Value(0)).current;
@@ -99,6 +100,15 @@ export default function HomeDashboardScreen() {
   useEffect(() => {
     setAvatarImageError(false);
   }, [avatarUrl]);
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setNowClock(new Date());
+    }, 1000);
+    return () => {
+      clearInterval(interval);
+    };
+  }, []);
 
   useEffect(() => {
     const avatarLoop = Animated.loop(
@@ -503,6 +513,30 @@ export default function HomeDashboardScreen() {
     });
   }, [favoriteResourceIds, latestResources]);
 
+  const hourAngle = useMemo(() => {
+    const hour = nowClock.getHours() % 12;
+    const minute = nowClock.getMinutes();
+    return hour * 30 + minute * 0.5;
+  }, [nowClock]);
+
+  const minuteAngle = useMemo(() => {
+    const minute = nowClock.getMinutes();
+    const second = nowClock.getSeconds();
+    return minute * 6 + second * 0.1;
+  }, [nowClock]);
+
+  const secondAngle = useMemo(() => nowClock.getSeconds() * 6, [nowClock]);
+  const dayTime = useMemo(
+    () =>
+      nowClock.toLocaleTimeString(locale || undefined, {
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+        hour12: false,
+      }),
+    [locale, nowClock]
+  );
+
   return (
     <TabSwipeShell tab="home">
     <View style={styles.page}>
@@ -581,7 +615,65 @@ export default function HomeDashboardScreen() {
 
         <Animated.View style={[styles.dayCard, dayCardAnimatedStyle]}>
           <Text style={styles.dayLabel}>{t('home.daySummary')}</Text>
-          <Text style={styles.dayDate}>{humanNow(locale)}</Text>
+          <View style={styles.dayHeadingRow}>
+            <View style={styles.dayTextBlock}>
+              <Text style={styles.dayDate}>
+                {humanNow(locale)}
+              </Text>
+              <View style={styles.dayTimeChip}>
+                <Text style={styles.dayTimeText}>{dayTime}</Text>
+              </View>
+            </View>
+
+            <View style={styles.analogClock}>
+              {Array.from({ length: 12 }).map((_, index) => {
+                const angle = (index / 12) * Math.PI * 2 - Math.PI / 2;
+                const center = 48;
+                const radius = 39;
+                const markerSize = index % 3 === 0 ? 4 : 2;
+                const x = center + radius * Math.cos(angle) - markerSize / 2;
+                const y = center + radius * Math.sin(angle) - markerSize / 2;
+                return (
+                  <View
+                    key={`tick-${index}`}
+                    style={[
+                      styles.analogTick,
+                      {
+                        left: x,
+                        top: y,
+                        width: markerSize,
+                        height: markerSize,
+                        borderRadius: markerSize / 2,
+                      },
+                    ]}
+                  />
+                );
+              })}
+
+              {[
+                { key: '12', left: 42, top: 5 },
+                { key: '3', left: 79, top: 41 },
+                { key: '6', left: 44, top: 79 },
+                { key: '9', left: 9, top: 41 },
+              ].map((item) => (
+                <Text key={item.key} style={[styles.analogHourLabel, { left: item.left, top: item.top }]}>
+                  {item.key}
+                </Text>
+              ))}
+
+              <View style={[styles.clockHandLayer, { transform: [{ rotate: `${hourAngle}deg` }] }]}>
+                <View style={styles.clockHandHour} />
+              </View>
+              <View style={[styles.clockHandLayer, { transform: [{ rotate: `${minuteAngle}deg` }] }]}>
+                <View style={styles.clockHandMinute} />
+              </View>
+              <View style={[styles.clockHandLayer, { transform: [{ rotate: `${secondAngle}deg` }] }]}>
+                <View style={styles.clockHandSecond} />
+              </View>
+
+              <View style={styles.analogCenterDot} />
+            </View>
+          </View>
           <View style={styles.statsRow}>
             <View style={styles.statCell}>
               <Text style={styles.statValue}>{todoCount}</Text>
@@ -652,6 +744,11 @@ export default function HomeDashboardScreen() {
                     <View style={styles.taskMain}>
                       <Text style={styles.taskTitle}>{task.title}</Text>
                       <Text style={styles.taskMeta}>{formatDateLabel(task.due_date, locale, t('common.noDate'))}</Text>
+                      <Text style={styles.taskMetaSecondary}>
+                        {t('tasks.createdAt', {
+                          date: formatDateTimeLabel(task.created_at, locale, t('common.noDate')),
+                        })}
+                      </Text>
                     </View>
                     <View style={styles.taskTail}>
                       <TouchableOpacity
@@ -701,7 +798,9 @@ export default function HomeDashboardScreen() {
                     <ResourceFileIcon resource={resource} size={34} style={styles.resourceIconWrap} />
                     <View style={styles.resourceMain}>
                       <Text style={styles.resourceTitle}>{resource.title}</Text>
-                      <Text style={styles.resourceMeta}>{formatDateLabel(resource.created_at, locale, t('common.noDate'))}</Text>
+                      <Text style={styles.resourceMeta}>
+                        {formatDateTimeLabel(resource.created_at, locale, t('common.noDate'))}
+                      </Text>
                     </View>
                     <TouchableOpacity
                       style={styles.favoriteIconBtn}
@@ -950,20 +1049,107 @@ const createStyles = (
   dayCard: {
     backgroundColor: colors.primary,
     borderRadius: 18,
-    padding: 18,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
     marginBottom: 4,
     ...cardShadow,
   },
   dayLabel: {
     color: '#DCE3FF',
-    marginBottom: 4,
+    marginBottom: 1,
   },
   dayDate: {
     color: '#FFFFFF',
-    fontSize: 20,
+    fontSize: 16,
     fontWeight: '700',
-    marginBottom: 16,
+    marginBottom: 0,
     textTransform: 'capitalize',
+    flex: 1,
+  },
+  dayTextBlock: {
+    flex: 1,
+    alignItems: 'flex-start',
+  },
+  dayTimeChip: {
+    marginTop: 6,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 8,
+    backgroundColor: 'rgba(10, 18, 48, 0.28)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.35)',
+  },
+  dayTimeText: {
+    color: '#FFFFFF',
+    fontSize: 12,
+    fontWeight: '700',
+    letterSpacing: 0.3,
+  },
+  dayHeadingRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 2,
+  },
+  analogClock: {
+    width: 96,
+    height: 96,
+    borderRadius: 48,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.35)',
+    backgroundColor: 'rgba(10, 18, 48, 0.28)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginLeft: 'auto',
+  },
+  analogTick: {
+    position: 'absolute',
+    backgroundColor: 'rgba(255,255,255,0.75)',
+  },
+  analogHourLabel: {
+    position: 'absolute',
+    color: 'rgba(255,255,255,0.88)',
+    fontSize: 9,
+    fontWeight: '700',
+  },
+  clockHandLayer: {
+    position: 'absolute',
+    width: 96,
+    height: 96,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  clockHandHour: {
+    position: 'absolute',
+    top: 24,
+    width: 2.5,
+    height: 22,
+    borderRadius: 2,
+    backgroundColor: '#FFFFFF',
+  },
+  clockHandMinute: {
+    position: 'absolute',
+    top: 17,
+    width: 2,
+    height: 31,
+    borderRadius: 2,
+    backgroundColor: '#DCE3FF',
+  },
+  clockHandSecond: {
+    position: 'absolute',
+    top: 13,
+    width: 1.2,
+    height: 35,
+    borderRadius: 1,
+    backgroundColor: '#93C5FD',
+  },
+  analogCenterDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: '#FFFFFF',
+    position: 'absolute',
+    zIndex: 5,
   },
   statsRow: {
     flexDirection: 'row',
@@ -974,33 +1160,36 @@ const createStyles = (
   },
   statValue: {
     color: '#FFFFFF',
-    fontSize: 22,
+    fontSize: 18,
     fontWeight: '800',
   },
   statText: {
     color: '#DCE3FF',
-    marginTop: 2,
+    marginTop: 1,
   },
   dayAiButton: {
-    marginTop: 12,
+    marginTop: 0,
     borderRadius: 999,
-    paddingHorizontal: 11,
-    paddingVertical: 7,
+    paddingHorizontal: 9,
+    paddingVertical: 5,
     backgroundColor: '#FFFFFF',
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
+    gap: 5,
+    width: '48%',
+    justifyContent: 'center',
   },
   dayActionsRow: {
     flexDirection: 'row',
-    flexWrap: 'wrap',
+    flexWrap: 'nowrap',
     alignItems: 'center',
-    gap: 8,
+    justifyContent: 'space-between',
+    marginTop: 6,
   },
   dayAiText: {
     color: colors.primary,
     fontWeight: '700',
-    fontSize: 12,
+    fontSize: 11,
   },
   statDivider: {
     width: 1,
@@ -1070,6 +1259,11 @@ const createStyles = (
   taskMeta: {
     color: colors.textMuted,
     fontSize: 12,
+  },
+  taskMetaSecondary: {
+    color: colors.textMuted,
+    fontSize: 11,
+    marginTop: 2,
   },
   priorityBadge: {
     borderRadius: 999,

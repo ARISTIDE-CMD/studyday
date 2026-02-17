@@ -6,7 +6,7 @@ import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-nati
 import { StateBlock } from '@/components/ui/state-block';
 import { useAppTheme } from '@/hooks/use-app-theme';
 import { useI18n } from '@/hooks/use-i18n';
-import { formatDateLabel } from '@/lib/format';
+import { formatDateTimeLabel } from '@/lib/format';
 import { useInAppNotification } from '@/providers/notification-provider';
 
 export default function NotificationsCenterScreen() {
@@ -99,7 +99,7 @@ export default function NotificationsCenterScreen() {
                   </Text>
                     </View>
                 <Text style={styles.dateText}>
-                  {formatDateLabel(item.createdAt, locale, t('common.noDate'))}
+                  {formatDateTimeLabel(item.createdAt, locale, t('common.noDate'))}
                 </Text>
               </View>
 

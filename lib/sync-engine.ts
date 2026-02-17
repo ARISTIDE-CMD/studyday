@@ -1,4 +1,5 @@
 import { getErrorMessage } from '@/lib/errors';
+import { encryptE2eeString } from '@/lib/offline-crypto';
 import {
   getOutboxOperations,
   setLocalProfile,
@@ -11,6 +12,7 @@ import {
 import { loadAppSettings } from '@/lib/settings-storage';
 import { supabase } from '@/lib/supabase';
 import { uploadLocalAssetToBucket } from '@/lib/supabase-storage-api';
+import type { StudySchedulePlan } from '@/types/study-schedule';
 
 const networkErrorHints = [
   'network',
@@ -62,6 +64,31 @@ function isMissingTaskArchiveColumnError(error: unknown): boolean {
   );
 }
 
+async function encryptScheduleRecord(record: StudySchedulePlan): Promise<StudySchedulePlan> {
+  const encryptedTitle = await encryptE2eeString(record.title);
+  const encryptedGoal = await encryptE2eeString(record.goal);
+  const encryptedPrefTitle = await encryptE2eeString(record.preferences.title);
+  const encryptedPrefGoal = await encryptE2eeString(record.preferences.goal);
+  const encryptedSessions = await Promise.all(
+    record.sessions.map(async (session) => ({
+      ...session,
+      focus: (await encryptE2eeString(session.focus)) ?? session.focus,
+    }))
+  );
+
+  return {
+    ...record,
+    title: encryptedTitle ?? record.title,
+    goal: encryptedGoal ?? record.goal,
+    preferences: {
+      ...record.preferences,
+      title: encryptedPrefTitle ?? record.preferences.title,
+      goal: encryptedPrefGoal ?? record.preferences.goal,
+    },
+    sessions: encryptedSessions,
+  };
+}
+
 async function syncOperation(operation: OutboxOperation): Promise<void> {
   if (operation.entity === 'task' || operation.entity === 'resource' || operation.entity === 'schedule') {
     const { error: profileError } = await supabase
@@ -86,28 +113,40 @@ async function syncOperation(operation: OutboxOperation): Promise<void> {
       await updateOutboxOperation(operation.id, { ...operation, record });
     }
 
-    const { error } = await supabase.from('profiles').upsert(record, { onConflict: 'id' });
+    const encryptedProfileRecord = {
+      ...record,
+      full_name: await encryptE2eeString(record.full_name),
+      avatar_url: await encryptE2eeString(record.avatar_url),
+    };
+
+    const { error } = await supabase.from('profiles').upsert(encryptedProfileRecord, { onConflict: 'id' });
     if (error) throw error;
     return;
   }
 
   if (operation.entity === 'task') {
     if (operation.action === 'upsert') {
-      const { error } = await supabase.from('tasks').upsert(operation.record, { onConflict: 'id' });
+      const encryptedTaskRecord = {
+        ...operation.record,
+        title: (await encryptE2eeString(operation.record.title)) ?? operation.record.title,
+        description: await encryptE2eeString(operation.record.description),
+      };
+
+      const { error } = await supabase.from('tasks').upsert(encryptedTaskRecord, { onConflict: 'id' });
       if (error) {
         if (!isMissingTaskArchiveColumnError(error)) {
           throw error;
         }
 
         const legacyRecord = {
-          id: operation.record.id,
-          user_id: operation.record.user_id,
-          title: operation.record.title,
-          description: operation.record.description,
-          status: operation.record.status,
-          priority: operation.record.priority,
-          due_date: operation.record.due_date,
-          created_at: operation.record.created_at,
+          id: encryptedTaskRecord.id,
+          user_id: encryptedTaskRecord.user_id,
+          title: encryptedTaskRecord.title,
+          description: encryptedTaskRecord.description,
+          status: encryptedTaskRecord.status,
+          priority: encryptedTaskRecord.priority,
+          due_date: encryptedTaskRecord.due_date,
+          created_at: encryptedTaskRecord.created_at,
         };
         const legacyUpsert = await supabase.from('tasks').upsert(legacyRecord, { onConflict: 'id' });
         if (legacyUpsert.error) throw legacyUpsert.error;
@@ -126,7 +165,8 @@ async function syncOperation(operation: OutboxOperation): Promise<void> {
 
   if (operation.entity === 'schedule') {
     if (operation.action === 'upsert') {
-      const { error } = await supabase.from('study_schedules').upsert(operation.record, { onConflict: 'id' });
+      const encryptedRecord = await encryptScheduleRecord(operation.record);
+      const { error } = await supabase.from('study_schedules').upsert(encryptedRecord, { onConflict: 'id' });
       if (error) throw error;
       await upsertLocalSchedule(operation.userId, operation.record);
       return;
@@ -157,7 +197,17 @@ async function syncOperation(operation: OutboxOperation): Promise<void> {
       await updateOutboxOperation(operation.id, { ...operation, record });
     }
 
-    const { error } = await supabase.from('resources').upsert(record, { onConflict: 'id' });
+    const encryptedResourceRecord = {
+      ...record,
+      title: (await encryptE2eeString(record.title)) ?? record.title,
+      content: await encryptE2eeString(record.content),
+      file_url: await encryptE2eeString(record.file_url),
+      tags: Array.isArray(record.tags)
+        ? await Promise.all(record.tags.map(async (tag) => (await encryptE2eeString(tag)) ?? tag))
+        : [],
+    };
+
+    const { error } = await supabase.from('resources').upsert(encryptedResourceRecord, { onConflict: 'id' });
     if (error) throw error;
     return;
   }

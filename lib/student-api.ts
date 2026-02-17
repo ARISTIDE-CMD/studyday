@@ -1,4 +1,5 @@
 import { getErrorMessage } from '@/lib/errors';
+import { decryptE2eeString } from '@/lib/offline-crypto';
 import {
   createEntityId,
   createLocalId,
@@ -61,6 +62,46 @@ function normalizeTask(task: Task): Task {
     completed_at: task.completed_at ?? null,
     is_persistent: Boolean(task.is_persistent),
   };
+}
+
+async function decryptTaskRecord(task: Task): Promise<Task> {
+  const title = await decryptE2eeString(task.title);
+  const description = await decryptE2eeString(task.description);
+  return {
+    ...task,
+    title: title ?? task.title,
+    description,
+  };
+}
+
+async function decryptTaskRecords(tasks: Task[]): Promise<Task[]> {
+  return Promise.all(tasks.map((task) => decryptTaskRecord(task)));
+}
+
+async function decryptResourceRecord(resource: Resource): Promise<Resource> {
+  const title = await decryptE2eeString(resource.title);
+  const content = await decryptE2eeString(resource.content);
+  const fileUrl = await decryptE2eeString(resource.file_url);
+  const tags = Array.isArray(resource.tags)
+    ? await Promise.all(
+      resource.tags.map(async (tag) => {
+        const decrypted = await decryptE2eeString(tag);
+        return decrypted ?? tag;
+      })
+    )
+    : [];
+
+  return {
+    ...resource,
+    title: title ?? resource.title,
+    content,
+    file_url: fileUrl,
+    tags,
+  };
+}
+
+async function decryptResourceRecords(resources: Resource[]): Promise<Resource[]> {
+  return Promise.all(resources.map((resource) => decryptResourceRecord(resource)));
 }
 
 async function getNormalizedLocalTasks(userId: string): Promise<Task[]> {
@@ -205,7 +246,7 @@ export async function fetchTasks(userId: string, options: RemoteReadOptions = {}
       throw legacy.error;
     }
 
-    const legacyWithDefaults = (legacy.data ?? []).map(withTaskArchiveDefaults);
+    const legacyWithDefaults = await decryptTaskRecords((legacy.data ?? []).map(withTaskArchiveDefaults));
     const next = await purgeExpiredLocalArchivedTasks(userId, sortTasks(legacyWithDefaults));
     const pendingCount = await getOutboxSize(userId);
     if (pendingCount > 0) {
@@ -228,7 +269,8 @@ export async function fetchTasks(userId: string, options: RemoteReadOptions = {}
     throw error;
   }
 
-  const next = await purgeExpiredLocalArchivedTasks(userId, sortTasks(data ?? []));
+  const decryptedTasks = await decryptTaskRecords(data ?? []);
+  const next = await purgeExpiredLocalArchivedTasks(userId, sortTasks(decryptedTasks));
   const pendingCount = await getOutboxSize(userId);
   if (pendingCount > 0) {
     const merged = sortTasks(mergeById(next, localTasks));
@@ -268,7 +310,7 @@ export async function fetchTaskById(userId: string, taskId: string, options: Rem
       throw legacy.error;
     }
 
-    const normalized = legacy.data ? withTaskArchiveDefaults(legacy.data) : null;
+    const normalized = legacy.data ? await decryptTaskRecord(withTaskArchiveDefaults(legacy.data)) : null;
     if (normalized) {
       await upsertLocalTask(userId, normalized);
     }
@@ -282,7 +324,9 @@ export async function fetchTaskById(userId: string, taskId: string, options: Rem
   }
 
   if (data) {
-    await upsertLocalTask(userId, data);
+    const decrypted = await decryptTaskRecord(data);
+    await upsertLocalTask(userId, decrypted);
+    return decrypted;
   }
 
   return data;
@@ -402,7 +446,8 @@ export async function fetchResources(userId: string, options: RemoteReadOptions 
     throw error;
   }
 
-  const next = sortResources(data ?? []);
+  const decryptedResources = await decryptResourceRecords(data ?? []);
+  const next = sortResources(decryptedResources);
   const pendingCount = await getOutboxSize(userId);
   if (pendingCount > 0) {
     const merged = sortResources(mergeById(next, localResources));
@@ -435,21 +480,23 @@ export async function fetchResourceById(userId: string, resourceId: string, opti
   }
 
   if (data) {
-    await upsertLocalResource(userId, data);
+    const decrypted = await decryptResourceRecord(data);
+    await upsertLocalResource(userId, decrypted);
+    if (!localResource) {
+      return decrypted;
+    }
+
+    const outbox = await getOutboxOperations(userId);
+    const hasPendingResourceForId = outbox.some((operation) => {
+      if (operation.entity !== 'resource') return false;
+      if (operation.action === 'upsert') return operation.record.id === resourceId;
+      return operation.recordId === resourceId;
+    });
+
+    return hasPendingResourceForId ? localResource : decrypted;
   }
 
-  if (!localResource) {
-    return data;
-  }
-
-  const outbox = await getOutboxOperations(userId);
-  const hasPendingResourceForId = outbox.some((operation) => {
-    if (operation.entity !== 'resource') return false;
-    if (operation.action === 'upsert') return operation.record.id === resourceId;
-    return operation.recordId === resourceId;
-  });
-
-  return hasPendingResourceForId ? localResource : data;
+  return localResource;
 }
 
 export async function createResource(input: {

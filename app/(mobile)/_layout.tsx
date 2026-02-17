@@ -2,6 +2,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { Redirect, Tabs } from 'expo-router';
 import React from 'react';
 import { ActivityIndicator, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useAppTheme } from '@/hooks/use-app-theme';
 import { useI18n } from '@/hooks/use-i18n';
@@ -56,6 +57,8 @@ export default function MobileTabsLayout() {
   const { session, loading } = useAuth();
   const { colors } = useAppTheme();
   const { t } = useI18n();
+  const insets = useSafeAreaInsets();
+  const safeBottom = Math.max(insets.bottom, 10);
 
   if (loading) {
     return (
@@ -88,8 +91,8 @@ export default function MobileTabsLayout() {
           marginVertical: 4,
         },
         tabBarStyle: {
-          height: 70,
-          paddingBottom: 10,
+          height: 60 + safeBottom,
+          paddingBottom: safeBottom,
           paddingTop: 8,
           borderTopColor: colors.border,
           backgroundColor: colors.surface,

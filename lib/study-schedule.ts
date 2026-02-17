@@ -9,6 +9,7 @@ import {
   setLocalSchedules,
   upsertLocalSchedule,
 } from '@/lib/offline-store';
+import { decryptE2eeString } from '@/lib/offline-crypto';
 import { isLikelyNetworkError } from '@/lib/sync-engine';
 import { supabase } from '@/lib/supabase';
 import type { Resource, Task } from '@/types/supabase';
@@ -287,6 +288,34 @@ function normalizePlanFromDb(value: unknown): StudySchedulePlan | null {
   };
 }
 
+async function decryptSchedulePlanRecord(plan: StudySchedulePlan): Promise<StudySchedulePlan> {
+  const title = await decryptE2eeString(plan.title);
+  const goal = await decryptE2eeString(plan.goal);
+  const preferencesTitle = await decryptE2eeString(plan.preferences.title);
+  const preferencesGoal = await decryptE2eeString(plan.preferences.goal);
+  const sessions = await Promise.all(
+    plan.sessions.map(async (session) => {
+      const focus = await decryptE2eeString(session.focus);
+      return {
+        ...session,
+        focus: focus ?? session.focus,
+      };
+    })
+  );
+
+  return {
+    ...plan,
+    title: title ?? plan.title,
+    goal: goal ?? plan.goal,
+    preferences: {
+      ...plan.preferences,
+      title: preferencesTitle ?? plan.preferences.title,
+      goal: preferencesGoal ?? plan.preferences.goal,
+    },
+    sessions,
+  };
+}
+
 export function getDefaultStudySchedulePreferences(today = new Date()): StudySchedulePreferences {
   const startDate = toIsoDate(today);
   const periodPreset: StudyPeriodPreset = 'trimester';
@@ -332,7 +361,8 @@ export async function getStudySchedulePlans(userId: string, options: RemoteReadO
     throw error;
   }
 
-  const remotePlans = (data ?? []).map(normalizePlanFromDb).filter(Boolean) as StudySchedulePlan[];
+  const normalizedRemotePlans = (data ?? []).map(normalizePlanFromDb).filter(Boolean) as StudySchedulePlan[];
+  const remotePlans = await Promise.all(normalizedRemotePlans.map((plan) => decryptSchedulePlanRecord(plan)));
   const pendingCount = await getOutboxSize(userId);
 
   const next = pendingCount > 0 ? sortPlans(mergeById(remotePlans, localPlans)) : sortPlans(remotePlans);
@@ -373,8 +403,9 @@ export async function getStudySchedulePlanById(
 
   const normalized = normalizePlanFromDb(data);
   if (normalized) {
-    await upsertLocalSchedule(userId, normalized);
-    return normalized;
+    const decrypted = await decryptSchedulePlanRecord(normalized);
+    await upsertLocalSchedule(userId, decrypted);
+    return decrypted;
   }
 
   return local;

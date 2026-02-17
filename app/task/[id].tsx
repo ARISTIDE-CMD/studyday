@@ -8,7 +8,7 @@ import { useAppTheme } from '@/hooks/use-app-theme';
 import { useI18n } from '@/hooks/use-i18n';
 import { getErrorMessage } from '@/lib/errors';
 import { duplicateTask, fetchTaskById, getCachedTaskById } from '@/lib/student-api';
-import { formatDateLabel } from '@/lib/format';
+import { formatDateLabel, formatDateTimeLabel } from '@/lib/format';
 import { useAuth } from '@/providers/auth-provider';
 import { useInAppNotification } from '@/providers/notification-provider';
 import type { Task } from '@/types/supabase';
@@ -144,6 +144,11 @@ export default function TaskDetailScreen() {
             <Text style={styles.title}>{task.title}</Text>
 
             <View style={styles.metaCard}>
+              <View style={styles.metaRow}>
+                <Text style={styles.metaLabel}>{t('taskDetail.createdAt')}</Text>
+                <Text style={styles.metaValue}>{formatDateTimeLabel(task.created_at, locale, t('common.noDate'))}</Text>
+              </View>
+
               <View style={styles.metaRow}>
                 <Text style={styles.metaLabel}>{t('taskDetail.dueDate')}</Text>
                 <Text style={styles.metaValue}>{formatDateLabel(task.due_date, locale, t('common.noDate'))}</Text>

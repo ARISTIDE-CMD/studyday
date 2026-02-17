@@ -10,7 +10,7 @@ import { TabSwipeShell } from '@/components/ui/tab-swipe-shell';
 import { useAppTheme } from '@/hooks/use-app-theme';
 import { useI18n } from '@/hooks/use-i18n';
 import { getErrorMessage } from '@/lib/errors';
-import { formatDateLabel, toIsoDate } from '@/lib/format';
+import { formatDateLabel, formatDateTimeLabel, toIsoDate } from '@/lib/format';
 import { deleteTask, fetchTasks, getCachedTasks, updateTask } from '@/lib/student-api';
 import { getUserPreferences, toggleFavoriteTask } from '@/lib/user-preferences';
 import { useAuth } from '@/providers/auth-provider';
@@ -501,6 +501,11 @@ export default function TasksScreen() {
                     <View style={themedStyles.cardMain}>
                       <Text style={[themedStyles.taskTitle, done && themedStyles.taskTitleDone]}>{task.title}</Text>
                       <Text style={themedStyles.meta}>{formatDateLabel(task.due_date, locale, t('common.noDate'))}</Text>
+                      <Text style={themedStyles.metaSecondary}>
+                        {t('tasks.createdAt', {
+                          date: formatDateTimeLabel(task.created_at, locale, t('common.noDate')),
+                        })}
+                      </Text>
                     </View>
 
                     {!isSelectionMode ? (
@@ -783,6 +788,11 @@ const createStyles = (
     meta: {
       fontSize: 12,
       color: colors.textMuted,
+    },
+    metaSecondary: {
+      fontSize: 11,
+      color: colors.textMuted,
+      marginTop: 2,
     },
     priorityBadge: {
       borderRadius: 999,

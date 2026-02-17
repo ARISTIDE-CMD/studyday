@@ -4,11 +4,13 @@ import { Platform } from 'react-native';
 export type ThemeMode = 'system' | 'light' | 'dark';
 export type AppLanguage = 'fr' | 'en';
 export type SyncMode = 'auto' | 'manual';
+export type NotificationSoundMode = 'device' | 'enhanced' | 'off';
 
 export type AppSettings = {
   themeMode: ThemeMode;
   language: AppLanguage;
   syncMode: SyncMode;
+  notificationSoundMode: NotificationSoundMode;
 };
 
 const STORAGE_KEY = 'studyday-app-settings-v1';
@@ -20,6 +22,7 @@ export const defaultSettings: AppSettings = {
   themeMode: 'dark',
   language: 'fr',
   syncMode: 'auto',
+  notificationSoundMode: 'device',
 };
 
 function isThemeMode(value: unknown): value is ThemeMode {
@@ -34,6 +37,10 @@ function isSyncMode(value: unknown): value is SyncMode {
   return value === 'auto' || value === 'manual';
 }
 
+function isNotificationSoundMode(value: unknown): value is NotificationSoundMode {
+  return value === 'device' || value === 'enhanced' || value === 'off';
+}
+
 function normalizeSettings(value: unknown): AppSettings {
   if (!value || typeof value !== 'object') {
     return { ...defaultSettings };
@@ -44,6 +51,9 @@ function normalizeSettings(value: unknown): AppSettings {
     themeMode: isThemeMode(raw.themeMode) ? raw.themeMode : defaultSettings.themeMode,
     language: isLanguage(raw.language) ? raw.language : defaultSettings.language,
     syncMode: isSyncMode(raw.syncMode) ? raw.syncMode : defaultSettings.syncMode,
+    notificationSoundMode: isNotificationSoundMode(raw.notificationSoundMode)
+      ? raw.notificationSoundMode
+      : defaultSettings.notificationSoundMode,
   };
 }
 

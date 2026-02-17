@@ -1,6 +1,7 @@
 import type { Session, User } from '@supabase/supabase-js';
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 
+import { decryptE2eeString, encryptE2eeString } from '@/lib/offline-crypto';
 import {
   createLocalId,
   enqueueOutboxOperation,
@@ -60,13 +61,30 @@ function resolveProfileMetadata(user: User): { fullName: string | null; avatarUr
   return { fullName, avatarUrl };
 }
 
+async function decryptProfileRecord(profile: Profile): Promise<Profile> {
+  const [fullName, avatarUrl] = await Promise.all([
+    decryptE2eeString(profile.full_name),
+    decryptE2eeString(profile.avatar_url),
+  ]);
+
+  return {
+    ...profile,
+    full_name: fullName,
+    avatar_url: avatarUrl,
+  };
+}
+
 async function upsertProfile(user: User): Promise<Profile | null> {
   const { fullName, avatarUrl } = resolveProfileMetadata(user);
+  const [encryptedFullName, encryptedAvatarUrl] = await Promise.all([
+    encryptE2eeString(fullName),
+    encryptE2eeString(avatarUrl),
+  ]);
 
   const { error: bootstrapError } = await supabase
     .from('profiles')
     .upsert(
-      { id: user.id, full_name: fullName, avatar_url: avatarUrl },
+      { id: user.id, full_name: encryptedFullName, avatar_url: encryptedAvatarUrl },
       { onConflict: 'id', ignoreDuplicates: true }
     );
 
@@ -88,21 +106,30 @@ async function upsertProfile(user: User): Promise<Profile | null> {
     return null;
   }
 
+  const decryptedData = await decryptProfileRecord(data);
   const patch: Partial<Profile> = {};
-  if (!data.full_name && fullName) {
+  if (!decryptedData.full_name && fullName) {
     patch.full_name = fullName;
   }
-  if (!data.avatar_url && avatarUrl) {
+  if (!decryptedData.avatar_url && avatarUrl) {
     patch.avatar_url = avatarUrl;
   }
 
   if (Object.keys(patch).length === 0) {
-    return data;
+    return decryptedData;
+  }
+
+  const encryptedPatch: { full_name?: string | null; avatar_url?: string | null } = {};
+  if (patch.full_name !== undefined) {
+    encryptedPatch.full_name = await encryptE2eeString(patch.full_name);
+  }
+  if (patch.avatar_url !== undefined) {
+    encryptedPatch.avatar_url = await encryptE2eeString(patch.avatar_url);
   }
 
   const { data: patched, error: patchError } = await supabase
     .from('profiles')
-    .update(patch)
+    .update(encryptedPatch)
     .eq('id', user.id)
     .select('id, full_name, avatar_url, role, created_at')
     .maybeSingle<Profile>();
@@ -111,7 +138,11 @@ async function upsertProfile(user: User): Promise<Profile | null> {
     throw patchError;
   }
 
-  return patched ?? { ...data, ...patch };
+  if (patched) {
+    return decryptProfileRecord(patched);
+  }
+
+  return { ...decryptedData, ...patch };
 }
 
 function fallbackNameFromUser(user: User): string {

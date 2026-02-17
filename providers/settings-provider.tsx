@@ -5,6 +5,7 @@ import {
   loadAppSettings,
   saveAppSettings,
   type AppLanguage,
+  type NotificationSoundMode,
   type SyncMode,
   type ThemeMode,
 } from '@/lib/settings-storage';
@@ -13,10 +14,12 @@ type SettingsContextValue = {
   language: AppLanguage;
   themeMode: ThemeMode;
   syncMode: SyncMode;
+  notificationSoundMode: NotificationSoundMode;
   settingsLoading: boolean;
   setLanguage: (value: AppLanguage) => void;
   setThemeMode: (value: ThemeMode) => void;
   setSyncMode: (value: SyncMode) => void;
+  setNotificationSoundMode: (value: NotificationSoundMode) => void;
 };
 
 const SettingsContext = createContext<SettingsContextValue | undefined>(undefined);
@@ -25,6 +28,9 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
   const [language, setLanguageState] = useState<AppLanguage>(defaultSettings.language);
   const [themeMode, setThemeModeState] = useState<ThemeMode>(defaultSettings.themeMode);
   const [syncMode, setSyncModeState] = useState<SyncMode>(defaultSettings.syncMode);
+  const [notificationSoundMode, setNotificationSoundModeState] = useState<NotificationSoundMode>(
+    defaultSettings.notificationSoundMode
+  );
   const [settingsLoading, setSettingsLoading] = useState(true);
 
   useEffect(() => {
@@ -36,6 +42,7 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
       setLanguageState(loaded.language);
       setThemeModeState(loaded.themeMode);
       setSyncModeState(loaded.syncMode);
+      setNotificationSoundModeState(loaded.notificationSoundMode);
       setSettingsLoading(false);
     })();
 
@@ -56,22 +63,28 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
     setSyncModeState(value);
   };
 
+  const setNotificationSoundMode = (value: NotificationSoundMode) => {
+    setNotificationSoundModeState(value);
+  };
+
   useEffect(() => {
     if (settingsLoading) return;
-    void saveAppSettings({ language, themeMode, syncMode });
-  }, [language, settingsLoading, syncMode, themeMode]);
+    void saveAppSettings({ language, themeMode, syncMode, notificationSoundMode });
+  }, [language, notificationSoundMode, settingsLoading, syncMode, themeMode]);
 
   const value = useMemo<SettingsContextValue>(
     () => ({
       language,
       themeMode,
       syncMode,
+      notificationSoundMode,
       settingsLoading,
       setLanguage,
       setThemeMode,
       setSyncMode,
+      setNotificationSoundMode,
     }),
-    [language, settingsLoading, syncMode, themeMode]
+    [language, notificationSoundMode, settingsLoading, syncMode, themeMode]
   );
 
   return <SettingsContext.Provider value={value}>{children}</SettingsContext.Provider>;

@@ -7,7 +7,9 @@ import React, {
   useRef,
   useState,
 } from 'react';
+import * as Haptics from 'expo-haptics';
 import { Animated, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Vibration } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useAppTheme } from '@/hooks/use-app-theme';
@@ -21,6 +23,7 @@ import {
   type ActivityNotificationItem,
 } from '@/lib/activity-notifications';
 import { useAuth } from '@/providers/auth-provider';
+import { useSettings } from '@/providers/settings-provider';
 
 type NotificationVariant = 'info' | 'success' | 'warning';
 
@@ -55,14 +58,36 @@ const NotificationContext = createContext<NotificationContextValue | undefined>(
 
 export function NotificationProvider({ children }: { children: React.ReactNode }) {
   const { user } = useAuth();
+  const { notificationSoundMode } = useSettings();
   const insets = useSafeAreaInsets();
   const { colors, cardShadow, isDark } = useAppTheme();
   const translateY = useRef(new Animated.Value(-180)).current;
   const hideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const idRef = useRef(0);
+  const lastCueAtRef = useRef(0);
 
   const [activeNotification, setActiveNotification] = useState<NotificationState | null>(null);
   const [activityNotifications, setActivityNotifications] = useState<ActivityNotificationItem[]>([]);
+
+  const playNotificationCue = useCallback(async () => {
+    if (notificationSoundMode === 'off') return;
+
+    const now = Date.now();
+    if (now - lastCueAtRef.current < 1200) return;
+    lastCueAtRef.current = now;
+
+    try {
+      if (notificationSoundMode === 'enhanced') {
+        await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+        Vibration.vibrate([0, 70, 40, 90]);
+        return;
+      }
+      await Haptics.selectionAsync();
+      Vibration.vibrate(40);
+    } catch {
+      // Keep notifications functional on devices without haptics/vibration support.
+    }
+  }, [notificationSoundMode]);
 
   useEffect(() => {
     let active = true;
@@ -122,8 +147,9 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
         message: input.message,
       });
       setActivityNotifications((prev) => [item, ...prev].slice(0, 120));
+      await playNotificationCue();
     },
-    [user?.id]
+    [playNotificationCue, user?.id]
   );
 
   const markAllActivityAsRead = useCallback(async () => {

@@ -11,7 +11,7 @@ import { TabSwipeShell } from '@/components/ui/tab-swipe-shell';
 import { useAppTheme } from '@/hooks/use-app-theme';
 import { useI18n } from '@/hooks/use-i18n';
 import { getErrorMessage } from '@/lib/errors';
-import { formatDateLabel } from '@/lib/format';
+import { formatDateTimeLabel } from '@/lib/format';
 import { getResourceExternalUrl } from '@/lib/resource-open';
 import { deleteResource, fetchResources, getCachedResources } from '@/lib/student-api';
 import { getUserPreferences, toggleFavoriteResource } from '@/lib/user-preferences';
@@ -461,7 +461,7 @@ export default function ResourcesScreen() {
                       </View>
                       <Text style={styles.resourceMeta}>
                         {t('resources.addedOn', {
-                          date: formatDateLabel(resource.created_at, locale, t('common.noDate')),
+                          date: formatDateTimeLabel(resource.created_at, locale, t('common.noDate')),
                         })}
                       </Text>
                       {linkUrl ? (
