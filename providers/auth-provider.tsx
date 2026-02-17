@@ -1,7 +1,8 @@
 import type { Session, User } from '@supabase/supabase-js';
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 
-import { decryptE2eeString, encryptE2eeString } from '@/lib/offline-crypto';
+import { createRemoteE2eeKeyBackup, hasRemoteE2eeKeyBackup, restoreRemoteE2eeKeyBackup } from '@/lib/e2ee-key-backup';
+import { decryptE2eeString, encryptE2eeString, hasLocalEncryptionKey } from '@/lib/offline-crypto';
 import {
   createLocalId,
   enqueueOutboxOperation,
@@ -21,8 +22,12 @@ type AuthContextValue = {
   profile: Profile | null;
   shouldShowPostLoginIntro: boolean;
   loading: boolean;
+  e2eeRecoveryRequired: boolean;
+  e2eeRecoveryLoading: boolean;
   refreshProfile: (options?: { remote?: boolean }) => Promise<void>;
   saveProfileLocalFirst: (patch: { full_name?: string | null; avatar_url?: string | null }) => Promise<void>;
+  saveE2eeBackup: (passphrase: string) => Promise<string>;
+  restoreE2eeFromCloud: (passphrase: string) => Promise<void>;
   queuePostLoginIntro: () => void;
   consumePostLoginIntro: () => void;
   signOut: () => Promise<void>;
@@ -155,10 +160,29 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [profile, setProfile] = useState<Profile | null>(null);
   const [shouldShowPostLoginIntro, setShouldShowPostLoginIntro] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [e2eeRecoveryRequired, setE2eeRecoveryRequired] = useState(false);
+  const [e2eeRecoveryLoading, setE2eeRecoveryLoading] = useState(false);
 
   const hasPendingProfileSync = useCallback(async (userId: string) => {
     const operations = await getOutboxOperations(userId);
     return operations.some((operation) => operation.entity === 'profile' && operation.action === 'upsert');
+  }, []);
+
+  const resolveE2eeRecoveryState = useCallback(async (userId: string): Promise<boolean> => {
+    const hasLocalKey = await hasLocalEncryptionKey();
+    if (hasLocalKey) {
+      setE2eeRecoveryRequired(false);
+      return false;
+    }
+
+    try {
+      const hasRemoteBackup = await hasRemoteE2eeKeyBackup(userId);
+      setE2eeRecoveryRequired(hasRemoteBackup);
+      return hasRemoteBackup;
+    } catch {
+      setE2eeRecoveryRequired(false);
+      return false;
+    }
   }, []);
 
   const refreshProfile = useCallback(async (options?: { remote?: boolean }) => {
@@ -172,7 +196,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setProfile(cached);
     }
 
-    if (!options?.remote) {
+    if (!options?.remote || e2eeRecoveryRequired) {
       return;
     }
 
@@ -188,7 +212,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         setProfile(null);
       }
     }
-  }, [hasPendingProfileSync, session?.user]);
+  }, [e2eeRecoveryRequired, hasPendingProfileSync, session?.user]);
 
   const saveProfileLocalFirst = useCallback(async (patch: { full_name?: string | null; avatar_url?: string | null }) => {
     if (!session?.user) {
@@ -223,6 +247,41 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     });
   }, [profile, session?.user]);
 
+  const saveE2eeBackup = useCallback(async (passphrase: string): Promise<string> => {
+    if (!session?.user?.id) {
+      throw new Error('Session utilisateur introuvable.');
+    }
+
+    const payload = await createRemoteE2eeKeyBackup(session.user.id, passphrase);
+    setE2eeRecoveryRequired(false);
+    return payload;
+  }, [session?.user?.id]);
+
+  const restoreE2eeFromCloud = useCallback(async (passphrase: string): Promise<void> => {
+    if (!session?.user?.id) {
+      throw new Error('Session utilisateur introuvable.');
+    }
+
+    setE2eeRecoveryLoading(true);
+    try {
+      await restoreRemoteE2eeKeyBackup(session.user.id, passphrase);
+      setE2eeRecoveryRequired(false);
+
+      const restoredProfile = await upsertProfile(session.user);
+      if (restoredProfile) {
+        await setLocalProfile(session.user.id, restoredProfile);
+        setProfile(restoredProfile);
+      }
+
+      await Promise.all([
+        hydrateLocalDataFromRemote(session.user.id),
+        hydrateStudySchedulesFromRemote(session.user.id),
+      ]);
+    } finally {
+      setE2eeRecoveryLoading(false);
+    }
+  }, [session?.user]);
+
   useEffect(() => {
     let active = true;
 
@@ -239,36 +298,41 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setSession(data.session);
 
       if (data.session?.user) {
-        const cachedProfile = await getLocalProfileById(data.session.user.id);
+        const userId = data.session.user.id;
+        const cachedProfile = await getLocalProfileById(userId);
         if (cachedProfile && active) {
           setProfile(cachedProfile);
         }
 
-        try {
-          const pendingProfileSync = await hasPendingProfileSync(data.session.user.id);
-          const dataProfile = await upsertProfile(data.session.user);
-          if (dataProfile && !pendingProfileSync) {
-            await setLocalProfile(data.session.user.id, dataProfile);
+        const requiresE2eeRecovery = await resolveE2eeRecoveryState(userId);
+        if (!requiresE2eeRecovery) {
+          try {
+            const pendingProfileSync = await hasPendingProfileSync(userId);
+            const dataProfile = await upsertProfile(data.session.user);
+            if (dataProfile && !pendingProfileSync) {
+              await setLocalProfile(userId, dataProfile);
+            }
+            if (active) {
+              setProfile(
+                pendingProfileSync
+                  ? (cachedProfile ?? dataProfile ?? null)
+                  : (dataProfile ?? cachedProfile ?? null)
+              );
+            }
+          } catch {
+            if (active && !cachedProfile) setProfile(null);
           }
-          if (active) {
-            setProfile(
-              pendingProfileSync
-                ? (cachedProfile ?? dataProfile ?? null)
-                : (dataProfile ?? cachedProfile ?? null)
-            );
-          }
-        } catch {
-          if (active && !cachedProfile) setProfile(null);
-        }
 
-        void Promise.all([
-          hydrateLocalDataFromRemote(data.session.user.id),
-          hydrateStudySchedulesFromRemote(data.session.user.id),
-        ]).catch(() => {
-          // Keep cached experience if remote hydration fails.
-        });
+          void Promise.all([
+            hydrateLocalDataFromRemote(userId),
+            hydrateStudySchedulesFromRemote(userId),
+          ]).catch(() => {
+            // Keep cached experience if remote hydration fails.
+          });
+        }
       } else {
         setProfile(null);
+        setE2eeRecoveryRequired(false);
       }
 
       if (active) setLoading(false);
@@ -284,6 +348,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       if (!nextSession?.user) {
         setProfile(null);
         setShouldShowPostLoginIntro(false);
+        setE2eeRecoveryRequired(false);
         setLoading(false);
         return;
       }
@@ -292,26 +357,35 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
       if (!shouldHydrateRemote) {
         void (async () => {
-          const cachedProfile = await getLocalProfileById(nextSession.user.id);
+          const userId = nextSession.user.id;
+          const cachedProfile = await getLocalProfileById(userId);
           if (active && cachedProfile) {
             setProfile(cachedProfile);
           }
+          await resolveE2eeRecoveryState(userId);
           if (active) setLoading(false);
         })();
         return;
       }
 
       void (async () => {
-        const cachedProfile = await getLocalProfileById(nextSession.user.id);
+        const userId = nextSession.user.id;
+        const cachedProfile = await getLocalProfileById(userId);
         if (active && cachedProfile) {
           setProfile(cachedProfile);
         }
 
+        const requiresE2eeRecovery = await resolveE2eeRecoveryState(userId);
+        if (requiresE2eeRecovery) {
+          if (active) setLoading(false);
+          return;
+        }
+
         try {
-          const pendingProfileSync = await hasPendingProfileSync(nextSession.user.id);
+          const pendingProfileSync = await hasPendingProfileSync(userId);
           const dataProfile = await upsertProfile(nextSession.user);
           if (dataProfile && !pendingProfileSync) {
-            await setLocalProfile(nextSession.user.id, dataProfile);
+            await setLocalProfile(userId, dataProfile);
           }
           if (active) {
             setProfile(
@@ -324,8 +398,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           if (active && !cachedProfile) setProfile(null);
         } finally {
           void Promise.all([
-            hydrateLocalDataFromRemote(nextSession.user.id),
-            hydrateStudySchedulesFromRemote(nextSession.user.id),
+            hydrateLocalDataFromRemote(userId),
+            hydrateStudySchedulesFromRemote(userId),
           ]).catch(() => {
             // Keep cached experience if remote hydration fails.
           });
@@ -339,7 +413,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       active = false;
       subscription.unsubscribe();
     };
-  }, []);
+  }, [hasPendingProfileSync, resolveE2eeRecoveryState]);
 
   const signOut = useCallback(async () => {
     if (session?.user?.id) {
@@ -349,11 +423,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setSession(null);
     setProfile(null);
     setShouldShowPostLoginIntro(false);
+    setE2eeRecoveryRequired(false);
+    setE2eeRecoveryLoading(false);
   }, [session?.user?.id]);
 
   const queuePostLoginIntro = useCallback(() => {
     setShouldShowPostLoginIntro(true);
-  }, []);
+  }, [hasPendingProfileSync, resolveE2eeRecoveryState]);
 
   const consumePostLoginIntro = useCallback(() => {
     setShouldShowPostLoginIntro(false);
@@ -366,13 +442,28 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       profile,
       shouldShowPostLoginIntro,
       loading,
+      e2eeRecoveryRequired,
+      e2eeRecoveryLoading,
       refreshProfile,
       saveProfileLocalFirst,
+      saveE2eeBackup,
+      restoreE2eeFromCloud,
       queuePostLoginIntro,
       consumePostLoginIntro,
       signOut,
     }),
-    [loading, profile, refreshProfile, saveProfileLocalFirst, session, shouldShowPostLoginIntro]
+    [
+      e2eeRecoveryLoading,
+      e2eeRecoveryRequired,
+      loading,
+      profile,
+      refreshProfile,
+      restoreE2eeFromCloud,
+      saveE2eeBackup,
+      saveProfileLocalFirst,
+      session,
+      shouldShowPostLoginIntro,
+    ]
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

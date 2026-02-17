@@ -12,7 +12,7 @@ const MIN_LAUNCH_DURATION_MS = 1400;
 const AI_HINT_ROTATION_MS = 2300;
 
 export default function Index() {
-  const { session, loading, shouldShowPostLoginIntro } = useAuth();
+  const { session, loading, shouldShowPostLoginIntro, e2eeRecoveryRequired } = useAuth();
   const { colors, cardShadow } = useAppTheme();
   const { t } = useI18n();
   const [minDelayDone, setMinDelayDone] = useState(false);
@@ -102,7 +102,7 @@ export default function Index() {
 
   if (!loading && minDelayDone) {
     if (session) {
-      if (shouldShowPostLoginIntro) {
+      if (shouldShowPostLoginIntro || e2eeRecoveryRequired) {
         return <Redirect href="/post-login" />;
       }
       return <Redirect href="/(mobile)" />;

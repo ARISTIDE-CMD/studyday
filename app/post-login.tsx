@@ -1,7 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import { Redirect, router } from 'expo-router';
-import React, { useCallback, useEffect, useMemo, useRef } from 'react';
-import { ActivityIndicator, Animated, Easing, Pressable, StyleSheet, Text, View } from 'react-native';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { ActivityIndicator, Animated, Easing, Pressable, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 
 import { useAppTheme } from '@/hooks/use-app-theme';
 import { useI18n } from '@/hooks/use-i18n';
@@ -10,9 +10,22 @@ import { useAuth } from '@/providers/auth-provider';
 const INTRO_DURATION_MS = 3600;
 
 export default function PostLoginScreen() {
-  const { loading, session, user, profile, shouldShowPostLoginIntro, consumePostLoginIntro } = useAuth();
+  const {
+    loading,
+    session,
+    user,
+    profile,
+    shouldShowPostLoginIntro,
+    e2eeRecoveryRequired,
+    e2eeRecoveryLoading,
+    restoreE2eeFromCloud,
+    consumePostLoginIntro,
+  } = useAuth();
   const { colors, cardShadow } = useAppTheme();
   const { t } = useI18n();
+  const [passphrase, setPassphrase] = useState('');
+  const [restoreError, setRestoreError] = useState('');
+  const shouldShowIntroScreen = shouldShowPostLoginIntro || e2eeRecoveryRequired;
 
   const titleAnim = useRef(new Animated.Value(0)).current;
   const cardAnim = useRef(new Animated.Value(0)).current;
@@ -38,8 +51,23 @@ export default function PostLoginScreen() {
     router.replace('/(mobile)');
   }, [consumePostLoginIntro]);
 
+  const onRestoreE2ee = useCallback(async () => {
+    if (passphrase.trim().length < 8) {
+      setRestoreError(t('postLogin.e2eePassphraseRequired'));
+      return;
+    }
+
+    setRestoreError('');
+    try {
+      await restoreE2eeFromCloud(passphrase.trim());
+      finishIntro();
+    } catch {
+      setRestoreError(t('postLogin.e2eeRestoreError'));
+    }
+  }, [finishIntro, passphrase, restoreE2eeFromCloud, t]);
+
   useEffect(() => {
-    if (!session || !shouldShowPostLoginIntro) {
+    if (!session || !shouldShowIntroScreen) {
       return;
     }
 
@@ -104,16 +132,28 @@ export default function PostLoginScreen() {
       }),
     ]).start();
 
-    const timer = setTimeout(() => {
-      finishIntro();
-    }, INTRO_DURATION_MS + 250);
+    const timer = e2eeRecoveryRequired
+      ? null
+      : setTimeout(() => {
+        finishIntro();
+      }, INTRO_DURATION_MS + 250);
 
     return () => {
-      clearTimeout(timer);
+      if (timer) clearTimeout(timer);
       leftLoop.stop();
       rightLoop.stop();
     };
-  }, [cardAnim, finishIntro, orbLeftAnim, orbRightAnim, progressAnim, session, shouldShowPostLoginIntro, titleAnim]);
+  }, [
+    cardAnim,
+    e2eeRecoveryRequired,
+    finishIntro,
+    orbLeftAnim,
+    orbRightAnim,
+    progressAnim,
+    session,
+    shouldShowIntroScreen,
+    titleAnim,
+  ]);
 
   if (loading) {
     return (
@@ -127,7 +167,7 @@ export default function PostLoginScreen() {
     return <Redirect href="/onboarding" />;
   }
 
-  if (!shouldShowPostLoginIntro) {
+  if (!shouldShowIntroScreen) {
     return <Redirect href="/(mobile)" />;
   }
 
@@ -212,12 +252,45 @@ export default function PostLoginScreen() {
           <Animated.View style={[styles.progressFill, { width: progressWidth }]} />
         </View>
 
-        <Text style={styles.progressLabel}>{t('postLogin.loadingDashboard')}</Text>
+        {e2eeRecoveryRequired ? (
+          <View style={styles.e2eeCard}>
+            <Text style={styles.e2eeTitle}>{t('postLogin.e2eeTitle')}</Text>
+            <Text style={styles.e2eeDescription}>{t('postLogin.e2eeDescription')}</Text>
+            <TextInput
+              style={styles.e2eeInput}
+              placeholder={t('postLogin.e2eePassphrasePlaceholder')}
+              placeholderTextColor={colors.textMuted}
+              secureTextEntry
+              autoCapitalize="none"
+              autoCorrect={false}
+              value={passphrase}
+              onChangeText={(value) => {
+                setPassphrase(value);
+                if (restoreError) setRestoreError('');
+              }}
+            />
+            <TouchableOpacity
+              style={[styles.e2eeBtn, e2eeRecoveryLoading && styles.e2eeBtnDisabled]}
+              onPress={() => void onRestoreE2ee()}
+              disabled={e2eeRecoveryLoading}>
+              {e2eeRecoveryLoading ? (
+                <ActivityIndicator size="small" color="#FFFFFF" />
+              ) : (
+                <Text style={styles.e2eeBtnText}>{t('postLogin.e2eeRestore')}</Text>
+              )}
+            </TouchableOpacity>
+            {restoreError ? <Text style={styles.e2eeError}>{restoreError}</Text> : null}
+          </View>
+        ) : (
+          <Text style={styles.progressLabel}>{t('postLogin.loadingDashboard')}</Text>
+        )}
       </Animated.View>
 
-      <Pressable onPress={finishIntro}>
-        <Text style={styles.skip}>{t('postLogin.skip')}</Text>
-      </Pressable>
+      {!e2eeRecoveryRequired ? (
+        <Pressable onPress={finishIntro}>
+          <Text style={styles.skip}>{t('postLogin.skip')}</Text>
+        </Pressable>
+      ) : null}
     </View>
   );
 }
@@ -395,6 +468,55 @@ const createStyles = (
     marginTop: 10,
     color: colors.textMuted,
     fontSize: 12,
+  },
+  e2eeCard: {
+    marginTop: 12,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.background,
+    padding: 12,
+    gap: 8,
+  },
+  e2eeTitle: {
+    color: colors.text,
+    fontWeight: '800',
+    fontSize: 13,
+  },
+  e2eeDescription: {
+    color: colors.textMuted,
+    fontSize: 12,
+    lineHeight: 17,
+  },
+  e2eeInput: {
+    minHeight: 42,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.surface,
+    color: colors.text,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+  },
+  e2eeBtn: {
+    minHeight: 40,
+    borderRadius: 10,
+    backgroundColor: colors.primary,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  e2eeBtnDisabled: {
+    opacity: 0.7,
+  },
+  e2eeBtnText: {
+    color: '#FFFFFF',
+    fontWeight: '700',
+    fontSize: 12,
+  },
+  e2eeError: {
+    color: colors.danger,
+    fontSize: 12,
+    fontWeight: '600',
   },
   skip: {
     color: colors.textMuted,

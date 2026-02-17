@@ -331,6 +331,17 @@ export function isEncryptionBackupSupported(): boolean {
   return hasAesSupport();
 }
 
+export async function hasLocalEncryptionKey(): Promise<boolean> {
+  const existing = await readKeyFromStorage();
+  if (!existing) return false;
+  try {
+    const decoded = base64ToBytes(existing);
+    return decoded.length === KEY_BYTES_LENGTH;
+  } catch {
+    return false;
+  }
+}
+
 export async function exportEncryptionKeyBackup(passphrase: string): Promise<string> {
   if (passphrase.length < 8) {
     throw new Error('Passphrase must be at least 8 characters long.');

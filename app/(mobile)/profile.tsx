@@ -27,7 +27,6 @@ import { getErrorMessage } from '@/lib/errors';
 import { getFocusStats } from '@/lib/focus-stats';
 import { formatDateTimeLabel } from '@/lib/format';
 import {
-  exportEncryptionKeyBackup,
   importEncryptionKeyBackup,
   isEncryptionBackupSupported,
 } from '@/lib/offline-crypto';
@@ -161,7 +160,7 @@ function SettingChip({
 }
 
 export default function ProfileScreen() {
-  const { user, profile, refreshProfile, signOut } = useAuth();
+  const { user, profile, refreshProfile, saveE2eeBackup, restoreE2eeFromCloud, signOut } = useAuth();
   const isOnline = useConnectivity();
   const {
     language,
@@ -188,7 +187,7 @@ export default function ProfileScreen() {
   const [signOutAction, setSignOutAction] = useState<'continue' | 'sync' | null>(null);
   const [backupPassphrase, setBackupPassphrase] = useState('');
   const [backupPayload, setBackupPayload] = useState('');
-  const [backupAction, setBackupAction] = useState<'export' | 'import' | null>(null);
+  const [backupAction, setBackupAction] = useState<'export' | 'import' | 'cloud_import' | null>(null);
   const [backupError, setBackupError] = useState('');
   const [backupMessage, setBackupMessage] = useState('');
   const [feedbackRating, setFeedbackRating] = useState(0);
@@ -196,6 +195,7 @@ export default function ProfileScreen() {
   const [feedbackMessage, setFeedbackMessage] = useState('');
   const [feedbackMessageTone, setFeedbackMessageTone] = useState<'success' | 'error' | null>(null);
   const [feedbackSubmitting, setFeedbackSubmitting] = useState(false);
+  const encryptionSupported = isEncryptionBackupSupported();
   const avatarPulse = React.useRef(new Animated.Value(0)).current;
   const hasHydratedRef = React.useRef(false);
   const registrationDate = profile?.created_at ?? user?.created_at ?? null;
@@ -351,7 +351,7 @@ export default function ProfileScreen() {
     setBackupError('');
     setBackupMessage('');
     try {
-      const payload = await exportEncryptionKeyBackup(backupPassphrase);
+      const payload = await saveE2eeBackup(backupPassphrase);
       setBackupPayload(payload);
       await Clipboard.setStringAsync(payload);
       setBackupMessage(t('profile.encryptionExportSuccess'));
@@ -362,15 +362,28 @@ export default function ProfileScreen() {
     }
   };
 
-  const onPasteBackupPayload = async () => {
+  const onRestoreCloudKeyBackup = async () => {
+    if (!isEncryptionBackupSupported()) {
+      setBackupError(t('profile.encryptionUnavailable'));
+      setBackupMessage('');
+      return;
+    }
+    if (backupPassphrase.length < 8) {
+      setBackupError(t('profile.encryptionPassphraseRequired'));
+      setBackupMessage('');
+      return;
+    }
+
+    setBackupAction('cloud_import');
+    setBackupError('');
+    setBackupMessage('');
     try {
-      const value = await Clipboard.getStringAsync();
-      if (value?.trim()) {
-        setBackupPayload(value.trim());
-        setBackupError('');
-      }
-    } catch {
-      setBackupError(t('profile.encryptionPasteError'));
+      await restoreE2eeFromCloud(backupPassphrase);
+      setBackupMessage(t('profile.encryptionCloudImportSuccess'));
+    } catch (error) {
+      setBackupError(getErrorMessage(error, t('profile.encryptionCloudImportError')));
+    } finally {
+      setBackupAction(null);
     }
   };
 
@@ -720,24 +733,34 @@ export default function ProfileScreen() {
               <Text style={themedStyles.settingsLabel}>{t('profile.encryptionTitle')}</Text>
               <View style={themedStyles.securityCard}>
                 <Text style={themedStyles.securityHint}>{t('profile.encryptionHint')}</Text>
+                {!encryptionSupported ? (
+                  <Text style={themedStyles.settingsError}>{t('profile.encryptionUnsupportedRuntimeHint')}</Text>
+                ) : null}
 
                 <Text style={themedStyles.inputLabel}>{t('profile.encryptionPassphraseLabel')}</Text>
                 <TextInput
-                  style={themedStyles.settingsInput}
+                  style={[
+                    themedStyles.settingsInput,
+                    !encryptionSupported ? themedStyles.securityControlDisabled : null,
+                  ]}
                   placeholder={t('profile.encryptionPassphrasePlaceholder')}
                   placeholderTextColor={colors.textMuted}
                   secureTextEntry
                   autoCapitalize="none"
                   autoCorrect={false}
+                  editable={encryptionSupported}
                   value={backupPassphrase}
                   onChangeText={setBackupPassphrase}
                 />
 
                 <View style={themedStyles.securityActionsRow}>
                   <TouchableOpacity
-                    style={[themedStyles.securityActionBtn, Boolean(backupAction) && themedStyles.syncNowBtnDisabled]}
+                    style={[
+                      themedStyles.securityActionBtn,
+                      (Boolean(backupAction) || !encryptionSupported) && themedStyles.syncNowBtnDisabled,
+                    ]}
                     onPress={() => void onExportKeyBackup()}
-                    disabled={Boolean(backupAction)}>
+                    disabled={Boolean(backupAction) || !encryptionSupported}>
                     {backupAction === 'export' ? (
                       <ActivityIndicator size="small" color="#FFFFFF" />
                     ) : (
@@ -746,27 +769,42 @@ export default function ProfileScreen() {
                   </TouchableOpacity>
 
                   <TouchableOpacity
-                    style={[themedStyles.securityActionGhostBtn, Boolean(backupAction) && themedStyles.syncNowBtnDisabled]}
-                    onPress={() => void onPasteBackupPayload()}
-                    disabled={Boolean(backupAction)}>
-                    <Text style={themedStyles.securityActionGhostBtnText}>{t('profile.encryptionPaste')}</Text>
+                    style={[
+                      themedStyles.securityActionGhostBtn,
+                      (Boolean(backupAction) || !encryptionSupported) && themedStyles.syncNowBtnDisabled,
+                    ]}
+                    onPress={() => void onRestoreCloudKeyBackup()}
+                    disabled={Boolean(backupAction) || !encryptionSupported}>
+                    {backupAction === 'cloud_import' ? (
+                      <ActivityIndicator size="small" color={colors.text} />
+                    ) : (
+                      <Text style={themedStyles.securityActionGhostBtnText}>{t('profile.encryptionRestoreCloud')}</Text>
+                    )}
                   </TouchableOpacity>
                 </View>
 
                 <Text style={themedStyles.inputLabel}>{t('profile.encryptionBackupLabel')}</Text>
                 <TextInput
-                  style={[themedStyles.settingsInput, themedStyles.settingsInputMultiline]}
+                  style={[
+                    themedStyles.settingsInput,
+                    themedStyles.settingsInputMultiline,
+                    !encryptionSupported ? themedStyles.securityControlDisabled : null,
+                  ]}
                   placeholder={t('profile.encryptionBackupPlaceholder')}
                   placeholderTextColor={colors.textMuted}
                   multiline
+                  editable={encryptionSupported}
                   value={backupPayload}
                   onChangeText={setBackupPayload}
                 />
 
                 <TouchableOpacity
-                  style={[themedStyles.securityActionBtn, Boolean(backupAction) && themedStyles.syncNowBtnDisabled]}
+                  style={[
+                    themedStyles.securityActionBtn,
+                    (Boolean(backupAction) || !encryptionSupported) && themedStyles.syncNowBtnDisabled,
+                  ]}
                   onPress={() => void onImportKeyBackup()}
-                  disabled={Boolean(backupAction)}>
+                  disabled={Boolean(backupAction) || !encryptionSupported}>
                   {backupAction === 'import' ? (
                     <ActivityIndicator size="small" color="#FFFFFF" />
                   ) : (
@@ -1374,6 +1412,9 @@ const createStyles = (
       padding: 12,
       marginBottom: 8,
       gap: 8,
+    },
+    securityControlDisabled: {
+      opacity: 0.55,
     },
     securityActionsRow: {
       flexDirection: 'row',
