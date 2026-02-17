@@ -2,7 +2,7 @@ import * as FileSystem from 'expo-file-system/legacy';
 import { Platform } from 'react-native';
 
 import { decodeOfflinePayload, encodeOfflinePayload } from '@/lib/offline-crypto';
-import type { Announcement, Profile, Resource, Task } from '@/types/supabase';
+import type { Announcement, Profile, ProfileFeedback, Resource, Task } from '@/types/supabase';
 import type { StudySchedulePlan } from '@/types/study-schedule';
 
 const STORAGE_KEY = 'studyday-offline-state-v1';
@@ -73,6 +73,15 @@ type OutboxScheduleDelete = {
   createdAt: string;
 };
 
+type OutboxFeedbackUpsert = {
+  id: string;
+  entity: 'feedback';
+  action: 'upsert';
+  userId: string;
+  record: ProfileFeedback;
+  createdAt: string;
+};
+
 export type OutboxOperation =
   | OutboxTaskUpsert
   | OutboxTaskDelete
@@ -80,10 +89,12 @@ export type OutboxOperation =
   | OutboxResourceDelete
   | OutboxProfileUpsert
   | OutboxScheduleUpsert
-  | OutboxScheduleDelete;
+  | OutboxScheduleDelete
+  | OutboxFeedbackUpsert;
 
 type OfflineState = {
   profilesByUser: Record<string, Profile>;
+  feedbackByUser: Record<string, ProfileFeedback[]>;
   tasksByUser: Record<string, Task[]>;
   resourcesByUser: Record<string, Resource[]>;
   schedulesByUser: Record<string, StudySchedulePlan[]>;
@@ -94,6 +105,7 @@ type OfflineState = {
 
 const defaultState: OfflineState = {
   profilesByUser: {},
+  feedbackByUser: {},
   tasksByUser: {},
   resourcesByUser: {},
   schedulesByUser: {},
@@ -118,6 +130,7 @@ function ensureStateShape(value: unknown): OfflineState {
   const partial = value as Partial<OfflineState>;
   return {
     profilesByUser: partial.profilesByUser && typeof partial.profilesByUser === 'object' ? partial.profilesByUser : {},
+    feedbackByUser: partial.feedbackByUser && typeof partial.feedbackByUser === 'object' ? partial.feedbackByUser : {},
     tasksByUser: partial.tasksByUser && typeof partial.tasksByUser === 'object' ? partial.tasksByUser : {},
     resourcesByUser:
       partial.resourcesByUser && typeof partial.resourcesByUser === 'object' ? partial.resourcesByUser : {},
@@ -159,9 +172,22 @@ export function createLocalId(prefix: string): string {
 
 function sanitizeStateForEntityIds(input: OfflineState): OfflineState {
   const state = cloneState(input);
+  const feedbackIdMapByUser = new Map<string, Map<string, string>>();
   const taskIdMapByUser = new Map<string, Map<string, string>>();
   const resourceIdMapByUser = new Map<string, Map<string, string>>();
   const scheduleIdMapByUser = new Map<string, Map<string, string>>();
+
+  Object.entries(state.feedbackByUser).forEach(([userId, feedbacks]) => {
+    const map = new Map<string, string>();
+    const normalized = feedbacks.map((feedback) => {
+      if (isUuid(feedback.id)) return feedback;
+      const nextId = createEntityId();
+      map.set(feedback.id, nextId);
+      return { ...feedback, id: nextId };
+    });
+    feedbackIdMapByUser.set(userId, map);
+    state.feedbackByUser[userId] = normalized;
+  });
 
   Object.entries(state.tasksByUser).forEach(([userId, tasks]) => {
     const map = new Map<string, string>();
@@ -201,6 +227,19 @@ function sanitizeStateForEntityIds(input: OfflineState): OfflineState {
 
   state.outbox = state.outbox.map((operation) => {
     if (operation.entity === 'profile') {
+      return operation;
+    }
+
+    if (operation.entity === 'feedback') {
+      const map = feedbackIdMapByUser.get(operation.userId);
+      const remapped = map?.get(operation.record.id);
+      if (remapped) {
+        return { ...operation, record: { ...operation.record, id: remapped } };
+      }
+      if (!isUuid(operation.record.id)) {
+        const nextId = createEntityId();
+        return { ...operation, record: { ...operation.record, id: nextId } };
+      }
       return operation;
     }
 
@@ -397,6 +436,30 @@ export async function setLocalProfile(userId: string, profile: Profile): Promise
 export async function removeLocalProfile(userId: string): Promise<void> {
   await updateState((state) => {
     delete state.profilesByUser[userId];
+  });
+}
+
+export async function getLocalProfileFeedbacks(userId: string): Promise<ProfileFeedback[]> {
+  const state = await loadState();
+  return [...(state.feedbackByUser[userId] ?? [])];
+}
+
+export async function setLocalProfileFeedbacks(userId: string, feedbacks: ProfileFeedback[]): Promise<void> {
+  await updateState((state) => {
+    state.feedbackByUser[userId] = [...feedbacks];
+  });
+}
+
+export async function upsertLocalProfileFeedback(userId: string, feedback: ProfileFeedback): Promise<void> {
+  await updateState((state) => {
+    const list = state.feedbackByUser[userId] ?? [];
+    const index = list.findIndex((item) => item.id === feedback.id);
+    if (index === -1) {
+      list.unshift(feedback);
+    } else {
+      list[index] = feedback;
+    }
+    state.feedbackByUser[userId] = list;
   });
 }
 

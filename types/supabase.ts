@@ -40,3 +40,11 @@ export type Announcement = {
   created_at: string | null;
   expires_at: string | null;
 };
+
+export type ProfileFeedback = {
+  id: string;
+  profile_id: string;
+  rating: number;
+  comment: string;
+  created_at: string | null;
+};

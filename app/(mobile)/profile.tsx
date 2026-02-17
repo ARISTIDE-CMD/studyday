@@ -31,6 +31,7 @@ import {
   importEncryptionKeyBackup,
   isEncryptionBackupSupported,
 } from '@/lib/offline-crypto';
+import { createProfileFeedback } from '@/lib/profile-feedback';
 import type { NotificationSoundMode, ThemeMode } from '@/lib/settings-storage';
 import { hydrateStudySchedulesFromRemote } from '@/lib/study-schedule';
 import {
@@ -57,13 +58,15 @@ function ActivityRing({
   centerValue: string;
   centerLabel: string;
 }) {
-  const segments = 72;
+  const segments = 60;
   const safeProgress = Math.max(0, Math.min(1, progress));
   const activeCount = Math.round(segments * safeProgress);
-  const dotSize = 6;
-  const ringPadding = 12;
+  const dotSize = Math.max(4, Math.round(size * 0.042));
+  const ringPadding = Math.round(size * 0.12);
   const radius = size / 2 - ringPadding;
   const center = size / 2;
+  const centerSize = size * 0.58;
+  const centerOffset = centerSize / 2;
 
   return (
     <View style={{ width: size, height: size }}>
@@ -84,7 +87,7 @@ function ActivityRing({
               height: dotSize,
               borderRadius: dotSize / 2,
               backgroundColor: active ? colors.primary : colors.border,
-              opacity: active ? 1 : 0.7,
+              opacity: active ? 1 : 0.55,
             }}
           />
         );
@@ -95,18 +98,18 @@ function ActivityRing({
           position: 'absolute',
           left: '50%',
           top: '50%',
-          width: size * 0.56,
-          height: size * 0.56,
-          marginLeft: -(size * 0.56) / 2,
-          marginTop: -(size * 0.56) / 2,
-          borderRadius: (size * 0.56) / 2,
+          width: centerSize,
+          height: centerSize,
+          marginLeft: -centerOffset,
+          marginTop: -centerOffset,
+          borderRadius: centerSize / 2,
           borderWidth: 1,
           borderColor: colors.border,
           backgroundColor: colors.surface,
           alignItems: 'center',
           justifyContent: 'center',
         }}>
-        <Text style={{ color: colors.primary, fontWeight: '800', fontSize: 28 }}>{centerValue}</Text>
+        <Text style={{ color: colors.primary, fontWeight: '800', fontSize: 24 }}>{centerValue}</Text>
         <Text style={{ color: colors.textMuted, fontSize: 11, marginTop: 2 }}>{centerLabel}</Text>
       </View>
     </View>
@@ -188,6 +191,11 @@ export default function ProfileScreen() {
   const [backupAction, setBackupAction] = useState<'export' | 'import' | null>(null);
   const [backupError, setBackupError] = useState('');
   const [backupMessage, setBackupMessage] = useState('');
+  const [feedbackRating, setFeedbackRating] = useState(0);
+  const [feedbackText, setFeedbackText] = useState('');
+  const [feedbackMessage, setFeedbackMessage] = useState('');
+  const [feedbackMessageTone, setFeedbackMessageTone] = useState<'success' | 'error' | null>(null);
+  const [feedbackSubmitting, setFeedbackSubmitting] = useState(false);
   const avatarPulse = React.useRef(new Animated.Value(0)).current;
   const hasHydratedRef = React.useRef(false);
   const registrationDate = profile?.created_at ?? user?.created_at ?? null;
@@ -403,6 +411,42 @@ export default function ProfileScreen() {
     }
   };
 
+  const onSubmitFeedback = async () => {
+    if (!user?.id) {
+      setFeedbackMessage(t('profile.feedbackSaveError'));
+      setFeedbackMessageTone('error');
+      return;
+    }
+
+    const clean = feedbackText.trim();
+    if (!clean && feedbackRating === 0) {
+      setFeedbackMessage(t('profile.feedbackRequired'));
+      setFeedbackMessageTone('error');
+      return;
+    }
+
+    setFeedbackSubmitting(true);
+    try {
+      await createProfileFeedback({
+        userId: user.id,
+        rating: Math.max(1, feedbackRating || 5),
+        comment: clean || t('profile.feedbackDefaultComment'),
+      });
+      setFeedbackMessage(t('profile.feedbackSuccess'));
+      setFeedbackMessageTone('success');
+      setFeedbackRating(0);
+      setFeedbackText('');
+      if (syncMode === 'auto' && isOnline) {
+        void triggerSync();
+      }
+    } catch {
+      setFeedbackMessage(t('profile.feedbackSaveError'));
+      setFeedbackMessageTone('error');
+    } finally {
+      setFeedbackSubmitting(false);
+    }
+  };
+
   return (
     <TabSwipeShell tab="profile">
     <View style={themedStyles.page}>
@@ -462,7 +506,7 @@ export default function ProfileScreen() {
           <View style={themedStyles.compactStatsCard}>
             <View style={themedStyles.compactStatsTop}>
               <ActivityRing
-                size={130}
+                size={112}
                 progress={completionRate}
                 colors={colors}
                 centerValue={`${Math.round(completionRate * 100)}%`}
@@ -499,13 +543,83 @@ export default function ProfileScreen() {
         {statsError ? <Text style={themedStyles.statsError}>{statsError}</Text> : null}
 
         <View style={themedStyles.quickActionsRow}>
-          <TouchableOpacity style={themedStyles.secondaryAction} onPress={() => router.push('/focus')}>
-            <Text style={themedStyles.secondaryActionText}>{t('profile.focusMode')}</Text>
-          </TouchableOpacity>
+          <View style={themedStyles.quickActionsSplitRow}>
+            <TouchableOpacity style={themedStyles.secondaryAction} onPress={() => router.push('/focus')}>
+              <Text style={themedStyles.secondaryActionText}>{t('profile.focusMode')}</Text>
+            </TouchableOpacity>
 
-          <TouchableOpacity style={themedStyles.secondaryAction} onPress={() => router.push('/ai-toolbox')}>
-            <Text style={themedStyles.secondaryActionText}>{t('profile.aiToolbox')}</Text>
-          </TouchableOpacity>
+            <TouchableOpacity style={themedStyles.secondaryAction} onPress={() => router.push('/ai-toolbox')}>
+              <View style={themedStyles.aiActionContent}>
+                <View style={themedStyles.aiActionIconWrap}>
+                  <Ionicons name="sparkles-outline" size={16} color={colors.primary} />
+                </View>
+                <View style={themedStyles.aiActionTextWrap}>
+                  <Text style={themedStyles.aiActionTitle}>{t('profile.aiToolbox')}</Text>
+                  <Text style={themedStyles.aiActionHint} numberOfLines={1}>
+                    {t('profile.aiToolboxHint')}
+                  </Text>
+                </View>
+              </View>
+            </TouchableOpacity>
+          </View>
+
+          <View style={themedStyles.feedbackCard}>
+            <View style={themedStyles.feedbackHead}>
+              <Ionicons name="chatbubble-ellipses-outline" size={14} color={colors.primary} />
+              <Text style={themedStyles.feedbackTitle}>{t('profile.feedbackTitle')}</Text>
+            </View>
+
+            <View style={themedStyles.feedbackStarsRow}>
+              {Array.from({ length: 5 }).map((_v, index) => {
+                const value = index + 1;
+                const active = value <= feedbackRating;
+                return (
+                  <TouchableOpacity
+                    key={`feedback-star-${value}`}
+                    style={themedStyles.feedbackStarBtn}
+                    onPress={() => setFeedbackRating(value)}>
+                    <Ionicons name={active ? 'star' : 'star-outline'} size={18} color={active ? '#F59E0B' : colors.textMuted} />
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+
+            <TextInput
+              style={themedStyles.feedbackInput}
+              placeholder={t('profile.feedbackPlaceholder')}
+              placeholderTextColor={colors.textMuted}
+              multiline
+              value={feedbackText}
+              onChangeText={(value) => {
+                setFeedbackText(value);
+                if (feedbackMessage) {
+                  setFeedbackMessage('');
+                  setFeedbackMessageTone(null);
+                }
+              }}
+            />
+
+            <TouchableOpacity
+              style={[themedStyles.feedbackSubmitBtn, feedbackSubmitting ? themedStyles.syncNowBtnDisabled : null]}
+              onPress={() => void onSubmitFeedback()}
+              disabled={feedbackSubmitting}>
+              {feedbackSubmitting ? (
+                <ActivityIndicator size="small" color="#FFFFFF" />
+              ) : (
+                <Text style={themedStyles.feedbackSubmitText}>{t('profile.feedbackSubmit')}</Text>
+              )}
+            </TouchableOpacity>
+
+            {feedbackMessage ? (
+              <Text
+                style={[
+                  themedStyles.feedbackMessage,
+                  feedbackMessageTone === 'error' ? themedStyles.feedbackMessageError : null,
+                ]}>
+                {feedbackMessage}
+              </Text>
+            ) : null}
+          </View>
         </View>
       </View>
 
@@ -788,17 +902,17 @@ const createStyles = (
     contentCompact: {
       flex: 1,
       paddingHorizontal: 16,
-      paddingBottom: 18,
-      justifyContent: 'space-between',
+      paddingBottom: 14,
+      gap: 8,
+      justifyContent: 'flex-start',
     },
     profileCard: {
       backgroundColor: colors.surface,
       borderRadius: 16,
       borderWidth: 1,
       borderColor: colors.border,
-      padding: 16,
+      padding: 14,
       alignItems: 'center',
-      marginBottom: 12,
       ...cardShadow,
     },
     avatar: {
@@ -815,7 +929,7 @@ const createStyles = (
       width: 62,
       height: 62,
       borderRadius: 31,
-      marginBottom: 10,
+      marginBottom: 8,
       alignItems: 'center',
       justifyContent: 'center',
       position: 'relative',
@@ -859,11 +973,11 @@ const createStyles = (
       color: colors.text,
     },
     email: {
-      marginTop: 4,
+      marginTop: 3,
       color: colors.textMuted,
     },
     avatarHint: {
-      marginTop: 6,
+      marginTop: 4,
       color: colors.textMuted,
       fontSize: 12,
     },
@@ -875,29 +989,29 @@ const createStyles = (
       borderRadius: 14,
       borderWidth: 1,
       borderColor: colors.border,
-      padding: 12,
+      padding: 10,
       ...cardShadow,
     },
     compactStatsTop: {
       flexDirection: 'row',
-      gap: 12,
+      gap: 10,
       alignItems: 'center',
-      marginBottom: 10,
+      marginBottom: 8,
     },
     compactStatsGrid: {
       flex: 1,
       flexDirection: 'row',
       flexWrap: 'wrap',
-      gap: 8,
+      gap: 6,
     },
     compactStatItem: {
-      width: '47%',
+      width: '48%',
       borderRadius: 10,
       borderWidth: 1,
       borderColor: colors.border,
       backgroundColor: colors.background,
-      paddingVertical: 8,
-      paddingHorizontal: 8,
+      paddingVertical: 6,
+      paddingHorizontal: 6,
       alignItems: 'center',
     },
     compactStatValue: {
@@ -907,12 +1021,16 @@ const createStyles = (
     },
     compactStatLabel: {
       color: colors.textMuted,
-      fontSize: 11,
+      fontSize: 10,
       textAlign: 'center',
       marginTop: 2,
     },
     quickActionsRow: {
-      gap: 10,
+      gap: 8,
+    },
+    quickActionsSplitRow: {
+      flexDirection: 'row',
+      gap: 8,
     },
     activityCard: {
       backgroundColor: colors.surface,
@@ -1067,18 +1185,114 @@ const createStyles = (
       fontWeight: '700',
     },
     secondaryAction: {
+      flex: 1,
       borderRadius: 12,
-      height: 46,
+      minHeight: 48,
       borderWidth: 1,
       borderColor: colors.border,
       backgroundColor: colors.surface,
       justifyContent: 'center',
       alignItems: 'center',
-      marginBottom: 12,
+      paddingHorizontal: 8,
+      paddingVertical: 6,
+    },
+    aiActionContent: {
+      width: '100%',
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 8,
+    },
+    aiActionIconWrap: {
+      width: 26,
+      height: 26,
+      borderRadius: 8,
+      borderWidth: 1,
+      borderColor: colors.primarySoft,
+      backgroundColor: colors.primarySoft,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    aiActionTextWrap: {
+      flex: 1,
+      gap: 1,
+    },
+    aiActionTitle: {
+      color: colors.text,
+      fontWeight: '700',
+      fontSize: 13,
+    },
+    aiActionHint: {
+      color: colors.textMuted,
+      fontSize: 11,
     },
     secondaryActionText: {
       color: colors.text,
       fontWeight: '700',
+    },
+    feedbackCard: {
+      borderRadius: 12,
+      borderWidth: 1,
+      borderColor: colors.border,
+      backgroundColor: colors.surface,
+      paddingHorizontal: 9,
+      paddingVertical: 8,
+      gap: 6,
+    },
+    feedbackHead: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 6,
+    },
+    feedbackTitle: {
+      color: colors.text,
+      fontWeight: '700',
+      fontSize: 13,
+    },
+    feedbackStarsRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 4,
+    },
+    feedbackStarBtn: {
+      width: 26,
+      height: 26,
+      borderRadius: 13,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    feedbackInput: {
+      borderRadius: 10,
+      borderWidth: 1,
+      borderColor: colors.border,
+      backgroundColor: colors.background,
+      minHeight: 48,
+      maxHeight: 58,
+      paddingHorizontal: 8,
+      paddingVertical: 6,
+      textAlignVertical: 'top',
+      color: colors.text,
+      fontSize: 12,
+    },
+    feedbackSubmitBtn: {
+      minHeight: 36,
+      borderRadius: 9,
+      backgroundColor: colors.primary,
+      alignItems: 'center',
+      justifyContent: 'center',
+      paddingHorizontal: 10,
+    },
+    feedbackSubmitText: {
+      color: '#FFFFFF',
+      fontWeight: '700',
+      fontSize: 12,
+    },
+    feedbackMessage: {
+      color: colors.success,
+      fontSize: 11,
+      fontWeight: '600',
+    },
+    feedbackMessageError: {
+      color: colors.danger,
     },
     dangerAction: {
       borderRadius: 12,

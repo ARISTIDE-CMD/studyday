@@ -90,7 +90,12 @@ async function encryptScheduleRecord(record: StudySchedulePlan): Promise<StudySc
 }
 
 async function syncOperation(operation: OutboxOperation): Promise<void> {
-  if (operation.entity === 'task' || operation.entity === 'resource' || operation.entity === 'schedule') {
+  if (
+    operation.entity === 'task'
+    || operation.entity === 'resource'
+    || operation.entity === 'schedule'
+    || operation.entity === 'feedback'
+  ) {
     const { error: profileError } = await supabase
       .from('profiles')
       .upsert({ id: operation.userId }, { onConflict: 'id' });
@@ -177,6 +182,17 @@ async function syncOperation(operation: OutboxOperation): Promise<void> {
       .delete()
       .eq('id', operation.recordId)
       .eq('user_id', operation.userId);
+    if (error) throw error;
+    return;
+  }
+
+  if (operation.entity === 'feedback') {
+    const encryptedFeedbackRecord = {
+      ...operation.record,
+      comment: (await encryptE2eeString(operation.record.comment)) ?? operation.record.comment,
+    };
+
+    const { error } = await supabase.from('profile_feedback').upsert(encryptedFeedbackRecord, { onConflict: 'id' });
     if (error) throw error;
     return;
   }

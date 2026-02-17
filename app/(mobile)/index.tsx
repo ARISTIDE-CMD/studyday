@@ -44,11 +44,13 @@ export default function HomeDashboardScreen() {
   const [fabMenuOpen, setFabMenuOpen] = useState(false);
   const [fabMenuVisible, setFabMenuVisible] = useState(false);
   const [nowClock, setNowClock] = useState(() => new Date());
+  const [subtitleIndex, setSubtitleIndex] = useState(0);
   const avatarPulse = useRef(new Animated.Value(0)).current;
   const dayCardBreath = useRef(new Animated.Value(0)).current;
   const fabFloat = useRef(new Animated.Value(0)).current;
   const fabMenuProgress = useRef(new Animated.Value(0)).current;
   const fabPressBump = useRef(new Animated.Value(0)).current;
+  const subtitleSlide = useRef(new Animated.Value(0)).current;
   const hasHydratedRef = useRef(false);
 
   const displayName = useMemo(() => {
@@ -87,6 +89,10 @@ export default function HomeDashboardScreen() {
       .join('');
     return value || 'E';
   }, [displayName]);
+  const subtitleMessages = useMemo(
+    () => [t('home.subtitle'), t('home.subtitleAi')],
+    [t]
+  );
   const styles = useMemo(() => createStyles(colors, cardShadow), [cardShadow, colors]);
   const priorityStyle = useMemo(
     () => ({
@@ -199,6 +205,35 @@ export default function HomeDashboardScreen() {
       if (finished) setFabMenuVisible(false);
     });
   }, [fabMenuOpen, fabMenuProgress]);
+
+  useEffect(() => {
+    if (subtitleMessages.length <= 1) return;
+
+    const rotate = () => {
+      Animated.timing(subtitleSlide, {
+        toValue: -12,
+        duration: 180,
+        easing: Easing.out(Easing.cubic),
+        useNativeDriver: true,
+      }).start(({ finished }) => {
+        if (!finished) return;
+        setSubtitleIndex((prev) => (prev + 1) % subtitleMessages.length);
+        subtitleSlide.setValue(12);
+        Animated.timing(subtitleSlide, {
+          toValue: 0,
+          duration: 200,
+          easing: Easing.out(Easing.cubic),
+          useNativeDriver: true,
+        }).start();
+      });
+    };
+
+    const interval = setInterval(rotate, 3200);
+    return () => {
+      clearInterval(interval);
+      subtitleSlide.stopAnimation();
+    };
+  }, [subtitleMessages, subtitleSlide]);
 
   const applySummary = useCallback((summary: Awaited<ReturnType<typeof fetchDashboardSummary>>) => {
     setTodoCount(summary.todoCount);
@@ -546,9 +581,23 @@ export default function HomeDashboardScreen() {
             <Text style={styles.greeting} numberOfLines={1} ellipsizeMode="tail">
               {t('home.greeting', { name: displayName })}
             </Text>
-            <Text style={styles.subtitle} numberOfLines={1} ellipsizeMode="tail">
-              {t('home.subtitle')}
-            </Text>
+            <View style={styles.subtitleViewport}>
+              <Animated.Text
+                style={[
+                  styles.subtitle,
+                  {
+                    transform: [{ translateY: subtitleSlide }],
+                    opacity: subtitleSlide.interpolate({
+                      inputRange: [-12, 0, 12],
+                      outputRange: [0, 1, 0],
+                    }),
+                  },
+                ]}
+                numberOfLines={1}
+                ellipsizeMode="tail">
+                {subtitleMessages[subtitleIndex]}
+              </Animated.Text>
+            </View>
           </View>
 
           <View style={styles.headerActions}>
@@ -963,6 +1012,11 @@ const createStyles = (
   subtitle: {
     marginTop: 4,
     color: colors.textMuted,
+    lineHeight: 18,
+  },
+  subtitleViewport: {
+    height: 18,
+    overflow: 'hidden',
   },
   headerActions: {
     flexDirection: 'row',
